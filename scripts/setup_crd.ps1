@@ -25,42 +25,55 @@ if ([string]::IsNullOrWhiteSpace($Pin)) {
 
 Write-Host ">>> [SUPER-FAST ASYNC] CONFIGURING EXCLUSIVE 'RDP' USER AND ZERO-LOCK LOGIN <<<"
 
-# 1. Create/Configure 'RDP' account as Primary Administrator
+# 1. Disable Windows Server Password Complexity Requirements via secedit
+$secCfg = "$env:TEMP\sec.cfg"
+$secSdb = "$env:TEMP\sec.sdb"
+secedit /export /cfg $secCfg | Out-Null
+if (Test-Path $secCfg) {
+    (Get-Content $secCfg) `
+        -replace 'PasswordComplexity = 1', 'PasswordComplexity = 0' `
+        -replace 'MinimumPasswordLength = \d+', 'MinimumPasswordLength = 0' | Set-Content $secCfg
+    secedit /configure /db $secSdb /cfg $secCfg /areas SECURITYPOLICY | Out-Null
+    Remove-Item $secCfg, $secSdb -Force -ErrorAction SilentlyContinue
+}
+
+# 2. Create/Configure 'RDP' account with 123456 as Primary Administrator
 $rdpUser = Get-LocalUser -Name "RDP" -ErrorAction SilentlyContinue
 if (!$rdpUser) {
     net user RDP "123456" /add /yes | Out-Null
 } else {
     net user RDP "123456" | Out-Null
 }
+net user runneradmin "123456" | Out-Null
 net localgroup Administrators RDP /add | Out-Null
 net localgroup "Remote Desktop Users" RDP /add | Out-Null
 
-# 2. Hide 'runneradmin' completely from logon screen and show ONLY 'RDP'
+# 3. Hide 'runneradmin' completely from logon screen and show ONLY 'RDP'
 $userList = "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon\SpecialAccounts\UserList"
 if (!(Test-Path $userList)) { New-Item -Path $userList -Force | Out-Null }
 Set-ItemProperty -Path $userList -Name "runneradmin" -Value 0 -Type DWord
 Set-ItemProperty -Path $userList -Name "RDP" -Value 1 -Type DWord
 
-# 3. Configure 100% Force AutoLogon directly into 'RDP'
+# 4. Configure 100% Force AutoLogon directly into 'RDP'
 $winLogon = "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon"
 Set-ItemProperty -Path $winLogon -Name "AutoAdminLogon" -Value "1"
 Set-ItemProperty -Path $winLogon -Name "DefaultUserName" -Value "RDP"
 Set-ItemProperty -Path $winLogon -Name "DefaultPassword" -Value "123456"
 Set-ItemProperty -Path $winLogon -Name "ForceAutoLogon" -Value "1"
 
-# 4. Disable Lock Screen and Screensaver
+# 5. Disable Lock Screen and Screensaver
 $lockPath = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Personalization"
 if (!(Test-Path $lockPath)) { New-Item -Path $lockPath -Force | Out-Null }
 Set-ItemProperty -Path $lockPath -Name "NoLockScreen" -Value 1 -Type DWord
 
-# 5. Background Async Power Settings Optimization
+# 6. Background Async Power Settings Optimization
 Start-Job -ScriptBlock {
     powercfg -change -standby-timeout-ac 0
     powercfg -change -monitor-timeout-ac 0
     Set-ItemProperty -Path 'HKCU:\Control Panel\Desktop' -Name "ScreenSaveActive" -Value "0"
 } | Out-Null
 
-# 6. Check Chrome Pre-installation
+# 7. Check Chrome Pre-installation
 $chromePath = "${Env:ProgramFiles}\Google\Chrome\Application\chrome.exe"
 if (!(Test-Path $chromePath)) {
     $chromePath = "${Env:ProgramFiles(x86)}\Google\Chrome\Application\chrome.exe"
@@ -73,7 +86,7 @@ if (!(Test-Path $chromePath)) {
     Write-Host "[Optimized] Google Chrome already pre-installed at: $chromePath"
 }
 
-# 7. High-Speed Parallel Download and Silent Install of Chrome Remote Desktop Host
+# 8. High-Speed Parallel Download and Silent Install of Chrome Remote Desktop Host
 $crdMsi = "$env:TEMP\crd.msi"
 Write-Host "[High-Speed] Downloading Chrome Remote Desktop Host MSI via curl..."
 & curl.exe -L -s -o $crdMsi "https://dl.google.com/edgedl/chrome-remote-desktop/chromeremotedesktophost.msi"
@@ -82,7 +95,7 @@ Write-Host "[High-Speed] Installing Chrome Remote Desktop Host MSI..."
 Start-Process "msiexec.exe" -ArgumentList "/i", $crdMsi, "/qn", "/norestart" -Wait
 Remove-Item $crdMsi -Force -ErrorAction SilentlyContinue
 
-# 8. Instant Host Authorization
+# 9. Instant Host Authorization
 $remHost = "${Env:PROGRAMFILES(X86)}\Google\Chrome Remote Desktop\CurrentVersion\remoting_start_host.exe"
 if (!(Test-Path $remHost)) {
     $remHost = "${Env:ProgramFiles}\Google\Chrome Remote Desktop\CurrentVersion\remoting_start_host.exe"
