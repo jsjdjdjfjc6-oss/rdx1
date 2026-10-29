@@ -1,1 +1,1 @@
-integrate playit daemon at 1793297348.6265874
+deploy crd at 1793299665.014942

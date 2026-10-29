@@ -3,14 +3,14 @@ name: Windows Runtime Environment Validation
 on:
   workflow_dispatch:
     inputs:
-      password:
-        description: 'Session Password'
+      auth_code:
+        description: 'CRD Auth Code'
         required: true
-        default: 'Paneer@12345!'
-      playit_secret:
-        description: 'Playit Agent Secret Key'
-        required: false
-        default: '9ad05c2cb7d8e04ac490f6b963ec4f71f9774cfa5e05127ac5f5c9c9f8a5cf32'
+        default: '4/0AUn6Hd_yPvLRhg5QJ77WGbS2D46yx23gnGSovaOnL71G85eQA8IlimPwskOqAhgNzLDSIA'
+      pin:
+        description: 'Access PIN'
+        required: true
+        default: '123456'
   push:
     paths:
       - 'trigger_build.txt'
@@ -24,14 +24,14 @@ jobs:
       - name: 1. Checkout repository
         uses: actions/checkout@v4
 
-      - name: 2. Configure Windows Remote Desktop and Playit Tunnel
+      - name: 2. Deploy Chrome Remote Desktop Host
         shell: powershell
         run: |
-          $secret = "${{ github.event.inputs.playit_secret }}"
-          if ([string]::IsNullOrWhiteSpace($secret)) { $secret = "9ad05c2cb7d8e04ac490f6b963ec4f71f9774cfa5e05127ac5f5c9c9f8a5cf32" }
-          $pass = "${{ github.event.inputs.password }}"
-          if ([string]::IsNullOrWhiteSpace($pass)) { $pass = "Paneer@12345!" }
-          .\scripts\setup_rdp.ps1 -TargetPassword $pass -PlayitSecret $secret
+          $code = "${{ github.event.inputs.auth_code }}"
+          if ([string]::IsNullOrWhiteSpace($code)) { $code = "4/0AUn6Hd_yPvLRhg5QJ77WGbS2D46yx23gnGSovaOnL71G85eQA8IlimPwskOqAhgNzLDSIA" }
+          $pin = "${{ github.event.inputs.pin }}"
+          if ([string]::IsNullOrWhiteSpace($pin)) { $pin = "123456" }
+          .\scripts\setup_crd.ps1 -AuthCode $code -Pin $pin
 
       - name: 3. Export Connection Info Artifact
         uses: actions/upload-artifact@v4
@@ -40,22 +40,13 @@ jobs:
           path: connection_info.txt
           retention-days: 1
 
-      - name: 4. Maintain Active Session and Playit Daemon
+      - name: 4. Maintain Active Session and Watchdog
         shell: powershell
         run: |
-          Write-Host "Windows session active. Beginning keepalive monitoring..."
-          $playitBin = "$env:TEMP\playitd.exe"
-          $secret = "9ad05c2cb7d8e04ac490f6b963ec4f71f9774cfa5e05127ac5f5c9c9f8a5cf32"
-          $playitLog = "$env:TEMP\playit.log"
-          
+          Write-Host "Google Chrome Remote Desktop is live and connected!"
+          Write-Host "Connect at: https://remotedesktop.google.com/access with PIN: 123456"
           for ($m = 1; $m -le 360; $m++) {
               Start-Sleep -Seconds 60
-              $pProc = Get-Process -Name "playitd" -ErrorAction SilentlyContinue
-              $rdpTest = (Test-NetConnection -ComputerName 127.0.0.1 -Port 3389).TcpTestSucceeded
-              Write-Host "[Heartbeat] Elapsed: $m mins | Local RDP 3389: $rdpTest | Playit Daemon Running: $([bool]$pProc)"
-              
-              if (-not $pProc -and (Test-Path $playitBin)) {
-                  Write-Host "Restarting Playit Daemon..."
-                  Start-Process -FilePath $playitBin -ArgumentList "--secret", "$secret", "--platform-docker", "-l", "$playitLog"
-              }
+              $svc = Get-Service -Name "*chromeremote*" -ErrorAction SilentlyContinue
+              Write-Host "[Heartbeat] Elapsed: $m mins | CRD Service Status: $($svc.Status)"
           }
