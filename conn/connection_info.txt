@@ -1,0 +1,8 @@
+﻿==========================================================================
+WINDOWS SERVER 2022 RUNTIME READY FOR WINDOWS APP
+Primary PC Address: 
+Pinggy Host       : 
+Ngrok Host        : 
+Username          : runneradmin
+Password          : Paneer@12345!
+==========================================================================

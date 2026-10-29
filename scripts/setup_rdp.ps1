@@ -13,7 +13,7 @@ try {
         secedit /configure /db "$env:TEMP\sec.sdb" /cfg "$env:TEMP\sec.cfg" /areas SECURITYPOLICY | Out-Null
     }
 } catch {
-    Write-Host "Policy bypass warning: $_"
+    Write-Host "Policy warning: $_"
 }
 
 # Enable Remote Desktop
@@ -32,7 +32,7 @@ Set-ItemProperty -Path $tsPath -Name "SelectTransportProtocol" -Value 1 -Type DW
 Set-ItemProperty -Path $tsPath -Name "AVC444ModePreferred" -Value 1 -Type DWord
 Set-ItemProperty -Path $tsPath -Name "MinCompressionLevel" -Value 1 -Type DWord
 
-# Configure User Credentials using net user and powershell
+# Configure User Credentials using net user
 try {
     net user runneradmin "$TargetPassword" /add /yes | Out-Null
 } catch {}
@@ -45,56 +45,81 @@ powercfg -change -standby-timeout-ac 0
 powercfg -change -monitor-timeout-ac 0
 Set-ItemProperty -Path 'HKCU:\Control Panel\Desktop' -Name "ScreenSaveActive" -Value "0"
 
-Write-Host "=== 2. INITIALIZING SECURE LOW-LATENCY TUNNELS ==="
+Write-Host "=== 2. INITIALIZING SECURE LOW-LATENCY MULTI-TUNNEL ==="
+
+$serveoLog = "$env:TEMP\serveo.log"
+Remove-Item $serveoLog -ErrorAction SilentlyContinue
 
 $pinggyLog = "$env:TEMP\pinggy.log"
 Remove-Item $pinggyLog -ErrorAction SilentlyContinue
 
-# Launch Pinggy SSH TCP tunnel to port 3389
-Start-Process -FilePath "ssh" -ArgumentList "-T", "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=NUL", "-o", "ServerAliveInterval=15", "-p", "443", "-R0:localhost:3389", "tcp@a.pinggy.io" -RedirectStandardOutput $pinggyLog -RedirectStandardError "$env:TEMP\pinggy_err.log"
+# Launch 1: Serveo TCP tunnel (direct, instant, no token needed)
+Write-Host "Launching Serveo TCP tunnel on port 3389..."
+Start-Process -FilePath "ssh" -ArgumentList "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=NUL", "-o", "ServerAliveInterval=15", "-R", "0:localhost:3389", "serveo.net" -RedirectStandardOutput $serveoLog -RedirectStandardError "$env:TEMP\serveo_err.log"
 
-Start-Sleep -Seconds 4
-$pinggyHost = ""
-for ($i = 0; $i -lt 30; $i++) {
-    if (Test-Path $pinggyLog) {
-        $logContent = Get-Content $pinggyLog -Raw
-        if ($logContent -match 'tcp://([a-zA-Z0-9\.\-]+):([0-9]+)') {
-            $pinggyHost = "$($matches[1]):$($matches[2])"
-            Write-Host "Found Pinggy Tunnel: $pinggyHost"
-            break
-        }
-    }
-    Start-Sleep -Seconds 1
-}
+# Launch 2: Pinggy TCP tunnel
+Write-Host "Launching Pinggy TCP tunnel..."
+Start-Process -FilePath "ssh" -ArgumentList "-T", "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=NUL", "-o", "ServerAliveInterval=15", "-p", "443", "-R", "0:localhost:3389", "tcp@free.pinggy.io" -RedirectStandardOutput $pinggyLog -RedirectStandardError "$env:TEMP\pinggy_err.log"
 
-# Optional Ngrok tunnel
+# Launch 3: Ngrok TCP if token provided
 $ngrokHost = ""
 if (-not [string]::IsNullOrWhiteSpace($NgrokToken)) {
-    Write-Host "Starting Secondary Ngrok TCP Tunnel..."
+    Write-Host "Launching Ngrok TCP tunnel..."
     $ngrokZip = "$env:TEMP\ngrok.zip"
     Invoke-WebRequest -Uri "https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-windows-amd64.zip" -OutFile $ngrokZip
     Expand-Archive -Path $ngrokZip -DestinationPath "$env:TEMP\ngrok" -Force
     & "$env:TEMP\ngrok\ngrok.exe" config add-authtoken $NgrokToken
     Start-Process -FilePath "$env:TEMP\ngrok\ngrok.exe" -ArgumentList "tcp", "3389", "--log=stdout" -RedirectStandardOutput "$env:TEMP\ngrok.log"
-    Start-Sleep -Seconds 3
-    for ($i = 0; $i -lt 15; $i++) {
+}
+
+# Poll tunnels for live host and port
+$serveoHost = ""
+$pinggyHost = ""
+
+for ($i = 0; $i -lt 30; $i++) {
+    # Check Serveo
+    if ([string]::IsNullOrWhiteSpace($serveoHost) -and (Test-Path $serveoLog)) {
+        $sContent = Get-Content $serveoLog -Raw
+        if ($sContent -match 'serveousercontent\.com:([0-9]+)') {
+            $serveoHost = "serveousercontent.com:$($matches[1])"
+            Write-Host "Found Serveo Address: $serveoHost"
+        }
+    }
+
+    # Check Pinggy
+    if ([string]::IsNullOrWhiteSpace($pinggyHost) -and (Test-Path $pinggyLog)) {
+        $pContent = Get-Content $pinggyLog -Raw
+        if ($pContent -match 'tcp://([a-zA-Z0-9\.\-]+):([0-9]+)') {
+            $pinggyHost = "$($matches[1]):$($matches[2])"
+            Write-Host "Found Pinggy Address: $pinggyHost"
+        }
+    }
+
+    # Check Ngrok
+    if (-not [string]::IsNullOrWhiteSpace($NgrokToken) -and [string]::IsNullOrWhiteSpace($ngrokHost)) {
         try {
             $tunnels = (Invoke-RestMethod -Uri "http://127.0.0.1:4040/api/tunnels" -ErrorAction Stop).tunnels
             if ($tunnels -and $tunnels[0].public_url) {
                 $ngrokHost = $tunnels[0].public_url -replace 'tcp://', ''
-                Write-Host "Found Ngrok Tunnel: $ngrokHost"
-                break
+                Write-Host "Found Ngrok Address: $ngrokHost"
             }
         } catch {}
-        Start-Sleep -Seconds 1
     }
+
+    if (-not [string]::IsNullOrWhiteSpace($serveoHost) -or -not [string]::IsNullOrWhiteSpace($pinggyHost) -or -not [string]::IsNullOrWhiteSpace($ngrokHost)) {
+        Write-Host "At least one tunnel address acquired!"
+        break
+    }
+    Start-Sleep -Seconds 1
 }
 
 $PRIMARY_CONNECTION = ""
-if (-not [string]::IsNullOrWhiteSpace($pinggyHost)) {
-    $PRIMARY_CONNECTION = $pinggyHost
-} elseif (-not [string]::IsNullOrWhiteSpace($ngrokHost)) {
+if (-not [string]::IsNullOrWhiteSpace($ngrokHost)) {
     $PRIMARY_CONNECTION = $ngrokHost
+} elseif (-not [string]::IsNullOrWhiteSpace($serveoHost)) {
+    $PRIMARY_CONNECTION = $serveoHost
+} elseif (-not [string]::IsNullOrWhiteSpace($pinggyHost)) {
+    $PRIMARY_CONNECTION = $pinggyHost
 }
 
 # Write connection details to file
@@ -102,8 +127,9 @@ $connLines = @(
     "==========================================================================",
     "WINDOWS SERVER 2022 RUNTIME READY FOR WINDOWS APP",
     "Primary PC Address: $PRIMARY_CONNECTION",
-    "Pinggy Host       : $pinggyHost",
-    "Ngrok Host        : $ngrokHost",
+    "Serveo Address    : $serveoHost",
+    "Pinggy Address    : $pinggyHost",
+    "Ngrok Address     : $ngrokHost",
     "Username          : runneradmin",
     "Password          : $TargetPassword",
     "=========================================================================="

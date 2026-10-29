@@ -8,7 +8,7 @@ on:
         required: true
         default: 'Paneer@12345!'
       ngrok_token:
-        description: 'Optional Ngrok Token (Leave blank to use Pinggy TCP)'
+        description: 'Optional Ngrok Token'
         required: false
         default: ''
   push:
