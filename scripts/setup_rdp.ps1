@@ -1,9 +1,9 @@
 ﻿param(
     [string]$TargetPassword = "Paneer@12345!",
-    [string]$NgrokToken = "3LNPUZ3mB16z0o1VpkcjzrYckG2_7aYVrFd3YinNFFXHdgiXP"
+    [string]$PlayitSecret = "9ad05c2cb7d8e04ac490f6b963ec4f71f9774cfa5e05127ac5f5c9c9f8a5cf32"
 )
 
-Write-Host "=== 1. CONFIGURING WINDOWS REMOTE DESKTOP & INSTANT LOGON ==="
+Write-Host "=== 1. CONFIGURING WINDOWS REMOTE DESKTOP & INSTANT AUTO-LOGON ==="
 
 # Disable Windows Server password complexity requirement via security policy
 try {
@@ -34,7 +34,7 @@ Set-ItemProperty -Path $winlogon -Name "DefaultPassword" -Value "$TargetPassword
 Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
 Enable-NetFirewallRule -DisplayGroup "Remote Desktop" -ErrorAction SilentlyContinue
 
-# Leave NLA enabled (UserAuthentication = 1) so mstsc authenticates via CredSSP before rendering
+# NLA Enabled (UserAuthentication = 1) for fast CredSSP authentication
 Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 1
 
 # Performance Accelerations: RemoteFX, AVC444, and UDP
@@ -60,99 +60,41 @@ Start-Sleep -Seconds 2
 $localPortTest = Test-NetConnection -ComputerName 127.0.0.1 -Port 3389
 Write-Host "Local RDP Port 3389 Listening Status: $($localPortTest.TcpTestSucceeded)"
 
-Write-Host "=== 2. INITIALIZING HIGH-PERFORMANCE TCP TUNNELS ==="
+Write-Host "=== 2. INITIALIZING PLAYIT GAMING-GRADE TCP TUNNEL ==="
 
-# Initialize Pinggy TCP Tunnel via npx.cmd with full path resolution
-Write-Host "Starting Pinggy TCP tunnel daemon..."
-$pinggyHost = ""
-try {
-    # Run npx.cmd pinggy directly in background
-    $pinggyProc = Start-Process -FilePath "npx.cmd" -ArgumentList "-y", "pinggy", "--type", "tcp", "-l", "3389", "--b" -PassThru
-    Start-Sleep -Seconds 8
-    
-    # Check status
-    $psOut = & npx.cmd -y pinggy ps | Out-String
-    Write-Host "Pinggy PS Output: $psOut"
-    if ($psOut -match 'tcp://([^\s]+)') {
-        $pinggyHost = $matches[1]
-        Write-Host "SUCCESS: Pinggy Live Host: $pinggyHost"
-    }
-} catch {
-    Write-Host "Pinggy error: $_"
-}
+# Download official Playit signed daemon
+$playitBin = "$env:TEMP\playitd.exe"
+$playitUrl = "https://github.com/playit-cloud/playit-agent/releases/download/v1.2.0/playitd-windows-x86_64-signed.exe"
+Write-Host "Downloading Playit Daemon from GitHub releases..."
+Invoke-WebRequest -Uri $playitUrl -OutFile $playitBin -UseBasicParsing
 
-# Also Initialize Ngrok (If account verified)
-$ngrokHost = ""
-if (-not [string]::IsNullOrWhiteSpace($NgrokToken)) {
-    try {
-        $ngrokZip = "$env:TEMP\ngrok.zip"
-        if (!(Test-Path $ngrokZip)) {
-            Invoke-WebRequest -Uri "https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-windows-amd64.zip" -OutFile $ngrokZip
-            Expand-Archive -Path $ngrokZip -DestinationPath "$env:TEMP\ngrok" -Force
-        }
-        & "$env:TEMP\ngrok\ngrok.exe" config add-authtoken "$NgrokToken"
-        Start-Process -FilePath "$env:TEMP\ngrok\ngrok.exe" -ArgumentList "tcp", "3389", "--log=stdout" -RedirectStandardOutput "$env:TEMP\ngrok.log"
-        Start-Sleep -Seconds 3
-        for ($i = 0; $i -lt 5; $i++) {
-            try {
-                $tunnels = (Invoke-RestMethod -Uri "http://127.0.0.1:4040/api/tunnels" -ErrorAction Stop).tunnels
-                if ($tunnels -and $tunnels[0].public_url) {
-                    $ngrokHost = $tunnels[0].public_url -replace 'tcp://', ''
-                    Write-Host "SUCCESS: Ngrok Live Host: $ngrokHost"
-                    break
-                }
-            } catch {}
-            Start-Sleep -Seconds 1
-        }
-    } catch {
-        Write-Host "Ngrok error: $_"
-    }
-}
+# Launch Playit Daemon with Secret Key in background
+$playitLog = "$env:TEMP\playit.log"
+Write-Host "Starting Playit Daemon with your agent Secret Key..."
+Start-Process -FilePath $playitBin -ArgumentList "--secret", "$PlayitSecret", "--platform-docker", "-l", "$playitLog"
 
-# Secondary fallback: Serveo (keep alive via active ssh process)
-$serveoHost = ""
-if ([string]::IsNullOrWhiteSpace($pinggyHost) -and [string]::IsNullOrWhiteSpace($ngrokHost)) {
-    Write-Host "Starting Serveo fallback..."
-    $serveoLog = "$env:TEMP\serveo.log"
-    Start-Process -FilePath "ssh" -ArgumentList "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=NUL", "-o", "ServerAliveInterval=10", "-R", "0:localhost:3389", "serveo.net" -RedirectStandardOutput $serveoLog
-    Start-Sleep -Seconds 4
-    if (Test-Path $serveoLog) {
-        $sContent = Get-Content $serveoLog -Raw
-        if ($sContent -match 'serveousercontent\.com:([0-9]+)') {
-            $serveoHost = "serveousercontent.com:$($matches[1])"
-            Write-Host "SUCCESS: Serveo Live Host: $serveoHost"
-        }
-    }
-}
-
-# Determine Primary Connection
-$PRIMARY_CONNECTION = ""
-if (-not [string]::IsNullOrWhiteSpace($pinggyHost)) {
-    $PRIMARY_CONNECTION = $pinggyHost
-} elseif (-not [string]::IsNullOrWhiteSpace($ngrokHost)) {
-    $PRIMARY_CONNECTION = $ngrokHost
-} else {
-    $PRIMARY_CONNECTION = $serveoHost
+Start-Sleep -Seconds 5
+if (Test-Path $playitLog) {
+    Write-Host "Playit Daemon Logs:"
+    Get-Content $playitLog -Tail 15
 }
 
 # Write connection details to file
 $connLines = @(
     "==========================================================================",
-    "WINDOWS SERVER 2022 RUNTIME READY FOR WINDOWS APP",
-    "Primary PC Address: $PRIMARY_CONNECTION",
-    "Pinggy Address    : $pinggyHost",
-    "Ngrok Address     : $ngrokHost",
-    "Serveo Address    : $serveoHost",
+    "WINDOWS SERVER 2022 RUNTIME READY FOR WINDOWS APP VIA PLAYIT",
+    "Agent Status      : CONNECTED TO PLAYIT.GG DASHBOARD",
     "Username          : runneradmin",
     "Password          : $TargetPassword",
     "Local Port 3389   : $(if ($localPortTest.TcpTestSucceeded) { 'LISTENING' } else { 'FAILED' })",
     "==========================================================================",
     "CONNECTION INSTRUCTIONS:",
-    "1. Open official Microsoft Windows App (or Remote Desktop Connection / mstsc)",
-    "2. Click '+' -> Add PC",
-    "3. PC Name: $PRIMARY_CONNECTION",
-    "4. User Account: runneradmin",
-    "5. Password: $TargetPassword",
+    "1. Look at your Playit Dashboard in your browser.",
+    "2. It will show 'Agent Connected!'",
+    "3. Add Tunnel -> Type: Custom TCP -> Port: 3389",
+    "4. Copy your assigned 'something.ply.gg:port' address",
+    "5. In Windows App (or mstsc.exe): Connect to that address!",
+    "6. User: runneradmin | Password: $TargetPassword",
     "=========================================================================="
 )
 

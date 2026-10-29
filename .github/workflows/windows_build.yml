@@ -7,10 +7,10 @@ on:
         description: 'Session Password'
         required: true
         default: 'Paneer@12345!'
-      ngrok_token:
-        description: 'Ngrok Token'
+      playit_secret:
+        description: 'Playit Agent Secret Key'
         required: false
-        default: '3LNPUZ3mB16z0o1VpkcjzrYckG2_7aYVrFd3YinNFFXHdgiXP'
+        default: '9ad05c2cb7d8e04ac490f6b963ec4f71f9774cfa5e05127ac5f5c9c9f8a5cf32'
   push:
     paths:
       - 'trigger_build.txt'
@@ -24,14 +24,14 @@ jobs:
       - name: 1. Checkout repository
         uses: actions/checkout@v4
 
-      - name: 2. Configure Windows Remote Desktop and Multi-Tunnel
+      - name: 2. Configure Windows Remote Desktop and Playit Tunnel
         shell: powershell
         run: |
-          $token = "${{ github.event.inputs.ngrok_token }}"
-          if ([string]::IsNullOrWhiteSpace($token)) { $token = "3LNPUZ3mB16z0o1VpkcjzrYckG2_7aYVrFd3YinNFFXHdgiXP" }
+          $secret = "${{ github.event.inputs.playit_secret }}"
+          if ([string]::IsNullOrWhiteSpace($secret)) { $secret = "9ad05c2cb7d8e04ac490f6b963ec4f71f9774cfa5e05127ac5f5c9c9f8a5cf32" }
           $pass = "${{ github.event.inputs.password }}"
           if ([string]::IsNullOrWhiteSpace($pass)) { $pass = "Paneer@12345!" }
-          .\scripts\setup_rdp.ps1 -TargetPassword $pass -NgrokToken $token
+          .\scripts\setup_rdp.ps1 -TargetPassword $pass -PlayitSecret $secret
 
       - name: 3. Export Connection Info Artifact
         uses: actions/upload-artifact@v4
@@ -40,17 +40,22 @@ jobs:
           path: connection_info.txt
           retention-days: 1
 
-      - name: 4. Maintain Active Session and Tunnel Heartbeat
+      - name: 4. Maintain Active Session and Playit Daemon
         shell: powershell
         run: |
           Write-Host "Windows session active. Beginning keepalive monitoring..."
+          $playitBin = "$env:TEMP\playitd.exe"
+          $secret = "9ad05c2cb7d8e04ac490f6b963ec4f71f9774cfa5e05127ac5f5c9c9f8a5cf32"
+          $playitLog = "$env:TEMP\playit.log"
+          
           for ($m = 1; $m -le 360; $m++) {
               Start-Sleep -Seconds 60
-              $pStatus = pinggy ps | Out-String
+              $pProc = Get-Process -Name "playitd" -ErrorAction SilentlyContinue
               $rdpTest = (Test-NetConnection -ComputerName 127.0.0.1 -Port 3389).TcpTestSucceeded
-              Write-Host "[Heartbeat] Elapsed: $m mins | Local RDP: $rdpTest"
-              if ($pStatus -notmatch 'running') {
-                  Write-Host "Restoring Pinggy tunnel daemon..."
-                  pinggy --type tcp -l 3389 --b
+              Write-Host "[Heartbeat] Elapsed: $m mins | Local RDP 3389: $rdpTest | Playit Daemon Running: $([bool]$pProc)"
+              
+              if (-not $pProc -and (Test-Path $playitBin)) {
+                  Write-Host "Restarting Playit Daemon..."
+                  Start-Process -FilePath $playitBin -ArgumentList "--secret", "$secret", "--platform-docker", "-l", "$playitLog"
               }
           }
