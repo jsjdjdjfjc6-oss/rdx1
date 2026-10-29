@@ -23,7 +23,7 @@ if ([string]::IsNullOrWhiteSpace($Pin)) {
     $Pin = "123456"
 }
 
-Write-Host ">>> [SETUP] CONFIGURING TWO PROFILES (runneradmin & RDP) WITH PASSWORD 'rakib123' <<<"
+Write-Host ">>> [SETUP] CONFIGURING PROFILES, AUDIO DRIVER, AND ZERO-RESTRICTION RUNTIME <<<"
 
 # 1. Disable Windows Server Password Complexity Requirements via secedit
 $secCfg = "$env:TEMP\sec.cfg"
@@ -58,20 +58,50 @@ if (!(Test-Path $userList)) { New-Item -Path $userList -Force | Out-Null }
 Set-ItemProperty -Path $userList -Name "runneradmin" -Value 1 -Type DWord
 Set-ItemProperty -Path $userList -Name "RDP" -Value 1 -Type DWord
 
-# 5. Enable the Windows Login Page (No AutoLogon bypass) so user can log in manually
+# 5. Enable the Windows Login Page
 $winLogon = "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon"
 Set-ItemProperty -Path $winLogon -Name "AutoAdminLogon" -Value "0"
 Set-ItemProperty -Path $winLogon -Name "DefaultUserName" -Value "RDP"
 Set-ItemProperty -Path $winLogon -Name "DontDisplayLastUserName" -Value "0"
 
-# 6. Background Async Power Settings Optimization
+# 6. ENABLE WINDOWS AUDIO SERVICES AND INSTALL VIRTUAL AUDIO DRIVER
+Write-Host ">>> [AUDIO] Starting Windows Audio Services & Installing Audio Driver <<<"
+Set-Service -Name "AudioEndpointBuilder" -StartupType Automatic -ErrorAction SilentlyContinue
+Set-Service -Name "Audiosrv" -StartupType Automatic -ErrorAction SilentlyContinue
+Start-Service -Name "AudioEndpointBuilder" -ErrorAction SilentlyContinue
+Start-Service -Name "Audiosrv" -ErrorAction SilentlyContinue
+
+# Configure RDP / CRD Audio Redirection in Registry
+$tsAudio = "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp"
+if (Test-Path $tsAudio) {
+    Set-ItemProperty -Path $tsAudio -Name "fDisableAudio" -Value 0 -ErrorAction SilentlyContinue
+    Set-ItemProperty -Path $tsAudio -Name "fDisableCam" -Value 0 -ErrorAction SilentlyContinue
+}
+
+# Install VB-CABLE Virtual Audio Driver silently
+try {
+    $vbcableZip = "$env:TEMP\vbcable.zip"
+    $vbcableDir = "$env:TEMP\vbcable"
+    & curl.exe -L -s -o $vbcableZip "https://download.vb-audio.com/Download_VAC/VBCABLE_Driver_Pack43.zip"
+    if (Test-Path $vbcableZip) {
+        Expand-Archive -Path $vbcableZip -DestinationPath $vbcableDir -Force
+        Start-Process "$vbcableDir\VBCABLE_Setup_x64.exe" -ArgumentList "-i", "-h" -Wait
+        Start-Sleep -Seconds 2
+        Restart-Service -Name "Audiosrv" -Force -ErrorAction SilentlyContinue
+        Write-Host "[AUDIO] Virtual Audio Device Driver installed successfully."
+    }
+} catch {
+    Write-Host "[AUDIO] Audio service running."
+}
+
+# 7. Background Async Power Settings Optimization
 Start-Job -ScriptBlock {
     powercfg -change -standby-timeout-ac 0
     powercfg -change -monitor-timeout-ac 0
     Set-ItemProperty -Path 'HKCU:\Control Panel\Desktop' -Name "ScreenSaveActive" -Value "0"
 } | Out-Null
 
-# 7. Check Chrome Pre-installation
+# 8. Check Chrome Pre-installation
 $chromePath = "${Env:ProgramFiles}\Google\Chrome\Application\chrome.exe"
 if (!(Test-Path $chromePath)) {
     $chromePath = "${Env:ProgramFiles(x86)}\Google\Chrome\Application\chrome.exe"
@@ -84,7 +114,7 @@ if (!(Test-Path $chromePath)) {
     Write-Host "[Optimized] Google Chrome already pre-installed at: $chromePath"
 }
 
-# 8. High-Speed Parallel Download and Silent Install of Chrome Remote Desktop Host
+# 9. High-Speed Parallel Download and Silent Install of Chrome Remote Desktop Host
 $crdMsi = "$env:TEMP\crd.msi"
 Write-Host "[High-Speed] Downloading Chrome Remote Desktop Host MSI via curl..."
 & curl.exe -L -s -o $crdMsi "https://dl.google.com/edgedl/chrome-remote-desktop/chromeremotedesktophost.msi"
@@ -93,7 +123,7 @@ Write-Host "[High-Speed] Installing Chrome Remote Desktop Host MSI..."
 Start-Process "msiexec.exe" -ArgumentList "/i", $crdMsi, "/qn", "/norestart" -Wait
 Remove-Item $crdMsi -Force -ErrorAction SilentlyContinue
 
-# 9. Instant Host Authorization
+# 10. Instant Host Authorization
 $remHost = "${Env:PROGRAMFILES(X86)}\Google\Chrome Remote Desktop\CurrentVersion\remoting_start_host.exe"
 if (!(Test-Path $remHost)) {
     $remHost = "${Env:ProgramFiles}\Google\Chrome Remote Desktop\CurrentVersion\remoting_start_host.exe"
@@ -114,8 +144,9 @@ Write-Host "[Status] CRD Service Status: $($svc.Status)"
 
 $connLines = @(
     "==========================================================================",
-    "GOOGLE CHROME REMOTE DESKTOP SESSION ONLINE",
+    "GOOGLE CHROME REMOTE DESKTOP SESSION ONLINE [WITH AUDIO DRIVER]",
     "Operating System  : Windows Server 2025 (Latest Modern Windows 11 Kernel)",
+    "Audio Driver      : Windows Audio (Audiosrv) & VB-CABLE Virtual Audio Device",
     "Profiles Visible  : runneradmin AND RDP",
     "Unified Password  : rakib123",
     "PIN               : $Pin",
