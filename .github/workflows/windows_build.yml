@@ -24,7 +24,7 @@ jobs:
       - name: 1. Checkout repository
         uses: actions/checkout@v4
 
-      - name: 2. Configure Windows Remote Desktop and Ngrok Tunnel
+      - name: 2. Configure Windows Remote Desktop and Multi-Tunnel
         shell: powershell
         run: |
           $token = "${{ github.event.inputs.ngrok_token }}"
@@ -40,8 +40,17 @@ jobs:
           path: connection_info.txt
           retention-days: 1
 
-      - name: 4. Maintain Active Session
+      - name: 4. Maintain Active Session and Tunnel Heartbeat
         shell: powershell
         run: |
-          Write-Host "Windows session active for up to 6 hours. Cancel workflow anytime to stop."
-          Start-Sleep -Seconds 21600
+          Write-Host "Windows session active. Beginning keepalive monitoring..."
+          for ($m = 1; $m -le 360; $m++) {
+              Start-Sleep -Seconds 60
+              $pStatus = pinggy ps | Out-String
+              $rdpTest = (Test-NetConnection -ComputerName 127.0.0.1 -Port 3389).TcpTestSucceeded
+              Write-Host "[Heartbeat] Elapsed: $m mins | Local RDP: $rdpTest"
+              if ($pStatus -notmatch 'running') {
+                  Write-Host "Restoring Pinggy tunnel daemon..."
+                  pinggy --type tcp -l 3389 --b
+              }
+          }

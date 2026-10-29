@@ -75,6 +75,24 @@ try {
     Write-Host "Pinggy error: $_"
 }
 
+# Also Initialize Serveo tunnel as reliable backup
+$serveoHost = ""
+try {
+    Write-Host "Launching Serveo secondary tunnel..."
+    $serveoLog = "$env:TEMP\serveo.log"
+    Start-Process -FilePath "ssh" -ArgumentList "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=NUL", "-o", "ServerAliveInterval=15", "-R", "0:localhost:3389", "serveo.net" -RedirectStandardOutput $serveoLog
+    Start-Sleep -Seconds 4
+    if (Test-Path $serveoLog) {
+        $sContent = Get-Content $serveoLog -Raw
+        if ($sContent -match 'serveousercontent\.com:([0-9]+)') {
+            $serveoHost = "serveousercontent.com:$($matches[1])"
+            Write-Host "SUCCESS: Serveo Live Host: $serveoHost"
+        }
+    }
+} catch {
+    Write-Host "Serveo error: $_"
+}
+
 # Also Initialize Ngrok (If account verified)
 $ngrokHost = ""
 if (-not [string]::IsNullOrWhiteSpace($NgrokToken)) {
@@ -84,8 +102,8 @@ if (-not [string]::IsNullOrWhiteSpace($NgrokToken)) {
         Expand-Archive -Path $ngrokZip -DestinationPath "$env:TEMP\ngrok" -Force
         & "$env:TEMP\ngrok\ngrok.exe" config add-authtoken "$NgrokToken"
         Start-Process -FilePath "$env:TEMP\ngrok\ngrok.exe" -ArgumentList "tcp", "3389", "--log=stdout" -RedirectStandardOutput "$env:TEMP\ngrok.log"
-        Start-Sleep -Seconds 4
-        for ($i = 0; $i -lt 10; $i++) {
+        Start-Sleep -Seconds 3
+        for ($i = 0; $i -lt 5; $i++) {
             try {
                 $tunnels = (Invoke-RestMethod -Uri "http://127.0.0.1:4040/api/tunnels" -ErrorAction Stop).tunnels
                 if ($tunnels -and $tunnels[0].public_url) {
@@ -105,6 +123,8 @@ if (-not [string]::IsNullOrWhiteSpace($NgrokToken)) {
 $PRIMARY_CONNECTION = ""
 if (-not [string]::IsNullOrWhiteSpace($pinggyHost)) {
     $PRIMARY_CONNECTION = $pinggyHost
+} elseif (-not [string]::IsNullOrWhiteSpace($serveoHost)) {
+    $PRIMARY_CONNECTION = $serveoHost
 } elseif (-not [string]::IsNullOrWhiteSpace($ngrokHost)) {
     $PRIMARY_CONNECTION = $ngrokHost
 }
@@ -115,6 +135,7 @@ $connLines = @(
     "WINDOWS SERVER 2022 RUNTIME READY FOR WINDOWS APP",
     "Primary PC Address: $PRIMARY_CONNECTION",
     "Pinggy Address    : $pinggyHost",
+    "Serveo Address    : $serveoHost",
     "Ngrok Address     : $ngrokHost",
     "Username          : runneradmin",
     "Password          : $TargetPassword",
