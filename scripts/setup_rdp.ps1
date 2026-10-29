@@ -3,7 +3,7 @@
     [string]$NgrokToken = "3LNPUZ3mB16z0o1VpkcjzrYckG2_7aYVrFd3YinNFFXHdgiXP"
 )
 
-Write-Host "=== 1. CONFIGURING WINDOWS REMOTE DESKTOP & SECURITY ==="
+Write-Host "=== 1. CONFIGURING WINDOWS REMOTE DESKTOP AND SECURITY ==="
 
 # Disable Windows Server password complexity requirement via security policy
 try {
@@ -55,55 +55,58 @@ Start-Sleep -Seconds 2
 $localPortTest = Test-NetConnection -ComputerName 127.0.0.1 -Port 3389
 Write-Host "Local RDP Port 3389 Listening Status: $($localPortTest.TcpTestSucceeded)"
 
-Write-Host "=== 2. INITIALIZING HIGH-SPEED NGROK TCP TUNNEL ==="
+Write-Host "=== 2. INITIALIZING HIGH-PERFORMANCE TCP TUNNELS ==="
 
-# Download and initialize Ngrok v3
-$ngrokZip = "$env:TEMP\ngrok.zip"
-Write-Host "Downloading official Ngrok agent..."
-Invoke-WebRequest -Uri "https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-windows-amd64.zip" -OutFile $ngrokZip
-Expand-Archive -Path $ngrokZip -DestinationPath "$env:TEMP\ngrok" -Force
-
-# Authenticate Ngrok
-& "$env:TEMP\ngrok\ngrok.exe" config add-authtoken "$NgrokToken"
-
-# Launch Ngrok TCP tunnel to port 3389
-Write-Host "Launching Ngrok TCP tunnel on port 3389..."
-Start-Process -FilePath "$env:TEMP\ngrok\ngrok.exe" -ArgumentList "tcp", "3389", "--log=stdout" -RedirectStandardOutput "$env:TEMP\ngrok.log" -RedirectStandardError "$env:TEMP\ngrok_err.log"
-
-Start-Sleep -Seconds 4
-$ngrokHost = ""
-for ($i = 0; $i -lt 25; $i++) {
-    try {
-        $tunnels = (Invoke-RestMethod -Uri "http://127.0.0.1:4040/api/tunnels" -ErrorAction Stop).tunnels
-        if ($tunnels -and $tunnels[0].public_url) {
-            $ngrokHost = $tunnels[0].public_url -replace 'tcp://', ''
-            Write-Host "SUCCESS! Ngrok Live Host: $ngrokHost"
-            break
-        }
-    } catch {}
-    Start-Sleep -Seconds 1
+# Initialize Pinggy TCP Tunnel (Fast, zero card required)
+Write-Host "Installing and starting Pinggy TCP tunnel..."
+$pinggyHost = ""
+try {
+    npm install -g pinggy | Out-Null
+    pinggy --type tcp -l 3389 --b
+    Start-Sleep -Seconds 4
+    $psOut = pinggy ps | Out-String
+    Write-Host "Pinggy PS Status:"
+    Write-Host $psOut
+    if ($psOut -match 'tcp://([^\s]+)') {
+        $pinggyHost = $matches[1]
+        Write-Host "SUCCESS: Pinggy Live Host: $pinggyHost"
+    }
+} catch {
+    Write-Host "Pinggy error: $_"
 }
 
-# Fallback: Also launch Serveo in case of backup
-$serveoHost = ""
-if ([string]::IsNullOrWhiteSpace($ngrokHost)) {
-    Write-Host "Ngrok waiting, launching Serveo fallback..."
-    $serveoLog = "$env:TEMP\serveo.log"
-    Start-Process -FilePath "ssh" -ArgumentList "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=NUL", "-o", "ServerAliveInterval=15", "-R", "0:localhost:3389", "serveo.net" -RedirectStandardOutput $serveoLog
-    Start-Sleep -Seconds 3
-    if (Test-Path $serveoLog) {
-        $sContent = Get-Content $serveoLog -Raw
-        if ($sContent -match 'serveousercontent\.com:([0-9]+)') {
-            $serveoHost = "serveousercontent.com:$($matches[1])"
+# Also Initialize Ngrok (If account verified)
+$ngrokHost = ""
+if (-not [string]::IsNullOrWhiteSpace($NgrokToken)) {
+    try {
+        $ngrokZip = "$env:TEMP\ngrok.zip"
+        Invoke-WebRequest -Uri "https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-windows-amd64.zip" -OutFile $ngrokZip
+        Expand-Archive -Path $ngrokZip -DestinationPath "$env:TEMP\ngrok" -Force
+        & "$env:TEMP\ngrok\ngrok.exe" config add-authtoken "$NgrokToken"
+        Start-Process -FilePath "$env:TEMP\ngrok\ngrok.exe" -ArgumentList "tcp", "3389", "--log=stdout" -RedirectStandardOutput "$env:TEMP\ngrok.log"
+        Start-Sleep -Seconds 4
+        for ($i = 0; $i -lt 10; $i++) {
+            try {
+                $tunnels = (Invoke-RestMethod -Uri "http://127.0.0.1:4040/api/tunnels" -ErrorAction Stop).tunnels
+                if ($tunnels -and $tunnels[0].public_url) {
+                    $ngrokHost = $tunnels[0].public_url -replace 'tcp://', ''
+                    Write-Host "SUCCESS: Ngrok Live Host: $ngrokHost"
+                    break
+                }
+            } catch {}
+            Start-Sleep -Seconds 1
         }
+    } catch {
+        Write-Host "Ngrok error: $_"
     }
 }
 
+# Determine Primary Address
 $PRIMARY_CONNECTION = ""
-if (-not [string]::IsNullOrWhiteSpace($ngrokHost)) {
+if (-not [string]::IsNullOrWhiteSpace($pinggyHost)) {
+    $PRIMARY_CONNECTION = $pinggyHost
+} elseif (-not [string]::IsNullOrWhiteSpace($ngrokHost)) {
     $PRIMARY_CONNECTION = $ngrokHost
-} else {
-    $PRIMARY_CONNECTION = $serveoHost
 }
 
 # Write connection details to file
@@ -111,38 +114,20 @@ $connLines = @(
     "==========================================================================",
     "WINDOWS SERVER 2022 RUNTIME READY FOR WINDOWS APP",
     "Primary PC Address: $PRIMARY_CONNECTION",
+    "Pinggy Address    : $pinggyHost",
     "Ngrok Address     : $ngrokHost",
-    "Serveo Address    : $serveoHost",
     "Username          : runneradmin",
     "Password          : $TargetPassword",
+    "Local Port 3389   : $(if ($localPortTest.TcpTestSucceeded) { 'LISTENING' } else { 'FAILED' })",
+    "==========================================================================",
+    "CONNECTION INSTRUCTIONS:",
+    "1. Open official Microsoft Windows App (or Remote Desktop Connection / mstsc)",
+    "2. Click '+' -> Add PC",
+    "3. PC Name: $PRIMARY_CONNECTION",
+    "4. User Account: runneradmin",
+    "5. Password: $TargetPassword",
     "=========================================================================="
 )
-$connLines | Out-File -FilePath "connection_info.txt" -Encoding utf8
+
+$connLines | Set-Content -Path "connection_info.txt" -Encoding utf8
 $connLines | ForEach-Object { Write-Host $_ }
-
-# Write GitHub Step Summary
-$summaryLines = @(
-    "## Windows Server 2022 Remote PC Ready",
-    "",
-    "### Connection Details for Windows App:",
-    "| Setting | Value |",
-    "|---|---|",
-    "| PC name (Host:Port) | $PRIMARY_CONNECTION |",
-    "| User account | runneradmin |",
-    "| Password | $TargetPassword |",
-    "",
-    "---",
-    "### How to Connect in Windows App (Microsoft Official):",
-    "1. Open Windows App.",
-    "2. Click Add a remote PC (or + button).",
-    "3. In PC name, paste: $PRIMARY_CONNECTION",
-    "4. In User account, choose Add user account:",
-    "   - Username: runneradmin",
-    "   - Password: $TargetPassword",
-    "5. Click Connect!"
-)
-if ($env:GITHUB_STEP_SUMMARY) {
-    $summaryLines | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
-}
-
-Write-Host "Setup completed successfully."
