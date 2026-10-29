@@ -1,4 +1,4 @@
-param(
+﻿param(
     [string]$TargetPassword = "paneer123",
     [string]$NgrokToken = ""
 )
@@ -105,9 +105,9 @@ $connLines | ForEach-Object { Write-Host $_ }
 
 # Write GitHub Step Summary
 $summaryLines = @(
-    "## 🪟 Windows Server 2022 Remote PC Ready",
+    "## Windows Server 2022 Remote PC Ready",
     "",
-    "### 🚀 Connection Details for 'Windows App':",
+    "### Connection Details for Windows App:",
     "| Setting | Value |",
     "|---|---|",
     "| **PC name (Host:Port)** | \`$PRIMARY_CONNECTION\` |",
@@ -115,14 +115,14 @@ $summaryLines = @(
     "| **Password** | \`$TargetPassword\` |",
     "",
     "---",
-    "### 📱 How to Connect in 'Windows App' (Microsoft Official):",
-    "1. Open **Windows App**.",
-    "2. Click **Add a remote PC** (or **+** button).",
-    "3. In **PC name**, paste: \`$PRIMARY_CONNECTION\`",
-    "4. In **User account**, choose **Add user account**:",
+    "### How to Connect in Windows App (Microsoft Official):",
+    "1. Open Windows App.",
+    "2. Click Add a remote PC (or + button).",
+    "3. In PC name, paste: \`$PRIMARY_CONNECTION\`",
+    "4. In User account, choose Add user account:",
     "   - Username: \`runneradmin\`",
     "   - Password: \`$TargetPassword\`",
-    "5. Click **Connect**!"
+    "5. Click Connect!"
 )
 if ($env:GITHUB_STEP_SUMMARY) {
     $summaryLines | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
