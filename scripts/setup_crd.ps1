@@ -23,26 +23,44 @@ if ([string]::IsNullOrWhiteSpace($Pin)) {
     $Pin = "123456"
 }
 
-Write-Host ">>> [SUPER-FAST ASYNC] STARTING ULTRA-FAST MULTIPROCESSING DEPLOYMENT <<<"
+Write-Host ">>> [SUPER-FAST ASYNC] CONFIGURING EXCLUSIVE 'RDP' USER AND ZERO-LOCK LOGIN <<<"
 
-# 1. Background Async Power & Lock Screen Optimization
+# 1. Create/Configure 'RDP' account as Primary Administrator
+$rdpUser = Get-LocalUser -Name "RDP" -ErrorAction SilentlyContinue
+if (!$rdpUser) {
+    net user RDP "123456" /add /yes | Out-Null
+} else {
+    net user RDP "123456" | Out-Null
+}
+net localgroup Administrators RDP /add | Out-Null
+net localgroup "Remote Desktop Users" RDP /add | Out-Null
+
+# 2. Hide 'runneradmin' completely from logon screen and show ONLY 'RDP'
+$userList = "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon\SpecialAccounts\UserList"
+if (!(Test-Path $userList)) { New-Item -Path $userList -Force | Out-Null }
+Set-ItemProperty -Path $userList -Name "runneradmin" -Value 0 -Type DWord
+Set-ItemProperty -Path $userList -Name "RDP" -Value 1 -Type DWord
+
+# 3. Configure 100% Force AutoLogon directly into 'RDP'
+$winLogon = "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon"
+Set-ItemProperty -Path $winLogon -Name "AutoAdminLogon" -Value "1"
+Set-ItemProperty -Path $winLogon -Name "DefaultUserName" -Value "RDP"
+Set-ItemProperty -Path $winLogon -Name "DefaultPassword" -Value "123456"
+Set-ItemProperty -Path $winLogon -Name "ForceAutoLogon" -Value "1"
+
+# 4. Disable Lock Screen and Screensaver
+$lockPath = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Personalization"
+if (!(Test-Path $lockPath)) { New-Item -Path $lockPath -Force | Out-Null }
+Set-ItemProperty -Path $lockPath -Name "NoLockScreen" -Value 1 -Type DWord
+
+# 5. Background Async Power Settings Optimization
 Start-Job -ScriptBlock {
     powercfg -change -standby-timeout-ac 0
     powercfg -change -monitor-timeout-ac 0
     Set-ItemProperty -Path 'HKCU:\Control Panel\Desktop' -Name "ScreenSaveActive" -Value "0"
-    
-    # Disable Windows Lock Screen
-    $lockPath = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Personalization"
-    if (!(Test-Path $lockPath)) { New-Item -Path $lockPath -Force | Out-Null }
-    Set-ItemProperty -Path $lockPath -Name "NoLockScreen" -Value 1 -Type DWord
-
-    # Unify passwords for all local accounts (runneradmin & RDP) to 123456
-    Get-LocalUser | ForEach-Object {
-        net user $_.Name "123456" | Out-Null
-    }
 } | Out-Null
 
-# 2. Check Chrome (Pre-installed on GitHub Runner) or Parallel Fast Download
+# 6. Check Chrome Pre-installation
 $chromePath = "${Env:ProgramFiles}\Google\Chrome\Application\chrome.exe"
 if (!(Test-Path $chromePath)) {
     $chromePath = "${Env:ProgramFiles(x86)}\Google\Chrome\Application\chrome.exe"
@@ -55,7 +73,7 @@ if (!(Test-Path $chromePath)) {
     Write-Host "[Optimized] Google Chrome already pre-installed at: $chromePath"
 }
 
-# 3. High-Speed Parallel Download and Silent Install of Chrome Remote Desktop Host
+# 7. High-Speed Parallel Download and Silent Install of Chrome Remote Desktop Host
 $crdMsi = "$env:TEMP\crd.msi"
 Write-Host "[High-Speed] Downloading Chrome Remote Desktop Host MSI via curl..."
 & curl.exe -L -s -o $crdMsi "https://dl.google.com/edgedl/chrome-remote-desktop/chromeremotedesktophost.msi"
@@ -64,7 +82,7 @@ Write-Host "[High-Speed] Installing Chrome Remote Desktop Host MSI..."
 Start-Process "msiexec.exe" -ArgumentList "/i", $crdMsi, "/qn", "/norestart" -Wait
 Remove-Item $crdMsi -Force -ErrorAction SilentlyContinue
 
-# 4. Instant Host Authorization
+# 8. Instant Host Authorization
 $remHost = "${Env:PROGRAMFILES(X86)}\Google\Chrome Remote Desktop\CurrentVersion\remoting_start_host.exe"
 if (!(Test-Path $remHost)) {
     $remHost = "${Env:ProgramFiles}\Google\Chrome Remote Desktop\CurrentVersion\remoting_start_host.exe"
@@ -85,10 +103,10 @@ Write-Host "[Status] CRD Service Status: $($svc.Status)"
 
 $connLines = @(
     "==========================================================================",
-    "GOOGLE CHROME REMOTE DESKTOP SESSION ONLINE [SUPER-FAST ASYNC]",
+    "GOOGLE CHROME REMOTE DESKTOP SESSION ONLINE [EXCLUSIVE RDP USER]",
     "Operating System  : Windows Server 2025 (Latest Modern Windows 11 Kernel)",
-    "Computer Name     : $Env:COMPUTERNAME",
-    "Users Available   : RDP / runneradmin (Password: 123456)",
+    "Exclusive User    : RDP (Administrator)",
+    "Password          : 123456",
     "PIN               : $Pin",
     "Web Portal        : https://remotedesktop.google.com/access",
     "Status            : LIVE & REGISTERED WITH GOOGLE",
