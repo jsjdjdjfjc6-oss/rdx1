@@ -3,7 +3,7 @@
     [string]$NgrokToken = "3LNPUZ3mB16z0o1VpkcjzrYckG2_7aYVrFd3YinNFFXHdgiXP"
 )
 
-Write-Host "=== 1. CONFIGURING WINDOWS REMOTE DESKTOP AND SECURITY ==="
+Write-Host "=== 1. CONFIGURING WINDOWS REMOTE DESKTOP & INSTANT LOGON ==="
 
 # Disable Windows Server password complexity requirement via security policy
 try {
@@ -16,22 +16,6 @@ try {
     Write-Host "Policy warning: $_"
 }
 
-# Enable Remote Desktop in Registry
-Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
-Enable-NetFirewallRule -DisplayGroup "Remote Desktop" -ErrorAction SilentlyContinue
-
-# Disable NLA for 100% client compatibility with Microsoft Windows App
-Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0
-
-# Enable Low-Latency RemoteFX, AVC444, and UDP Accelerated Transport
-$tsPath = "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services"
-if (!(Test-Path $tsPath)) { New-Item -Path $tsPath -Force | Out-Null }
-Set-ItemProperty -Path $tsPath -Name "fEnableRemoteFXAdvancedRemoteFX" -Value 1 -Type DWord
-Set-ItemProperty -Path $tsPath -Name "SelectNetworkDetect" -Value 1 -Type DWord
-Set-ItemProperty -Path $tsPath -Name "SelectTransportProtocol" -Value 1 -Type DWord
-Set-ItemProperty -Path $tsPath -Name "AVC444ModePreferred" -Value 1 -Type DWord
-Set-ItemProperty -Path $tsPath -Name "MinCompressionLevel" -Value 1 -Type DWord
-
 # Configure User Credentials using net user
 try {
     net user runneradmin "$TargetPassword" /add /yes | Out-Null
@@ -40,8 +24,29 @@ net user runneradmin "$TargetPassword" /active:yes | Out-Null
 net localgroup Administrators runneradmin /add | Out-Null
 net localgroup "Remote Desktop Users" runneradmin /add | Out-Null
 
-# Explicitly Enable and Start Remote Desktop Service (TermService)
-Write-Host "Ensuring TermService is running and listening on port 3389..."
+# Enable Windows AutoLogon for runneradmin to eliminate login loading screen hang
+$winlogon = "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon"
+Set-ItemProperty -Path $winlogon -Name "AutoAdminLogon" -Value "1"
+Set-ItemProperty -Path $winlogon -Name "DefaultUserName" -Value "runneradmin"
+Set-ItemProperty -Path $winlogon -Name "DefaultPassword" -Value "$TargetPassword"
+
+# Enable Remote Desktop in Registry & Firewall
+Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
+Enable-NetFirewallRule -DisplayGroup "Remote Desktop" -ErrorAction SilentlyContinue
+
+# Leave NLA enabled (UserAuthentication = 1) so mstsc authenticates via CredSSP before rendering
+Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 1
+
+# Performance Accelerations: RemoteFX, AVC444, and UDP
+$tsPath = "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services"
+if (!(Test-Path $tsPath)) { New-Item -Path $tsPath -Force | Out-Null }
+Set-ItemProperty -Path $tsPath -Name "fEnableRemoteFXAdvancedRemoteFX" -Value 1 -Type DWord
+Set-ItemProperty -Path $tsPath -Name "SelectNetworkDetect" -Value 1 -Type DWord
+Set-ItemProperty -Path $tsPath -Name "SelectTransportProtocol" -Value 1 -Type DWord
+Set-ItemProperty -Path $tsPath -Name "AVC444ModePreferred" -Value 1 -Type DWord
+Set-ItemProperty -Path $tsPath -Name "MinCompressionLevel" -Value 1 -Type DWord
+
+# Start Remote Desktop Service (TermService)
 Set-Service -Name "TermService" -StartupType Automatic
 Start-Service -Name "TermService" -ErrorAction SilentlyContinue
 
@@ -57,16 +62,17 @@ Write-Host "Local RDP Port 3389 Listening Status: $($localPortTest.TcpTestSuccee
 
 Write-Host "=== 2. INITIALIZING HIGH-PERFORMANCE TCP TUNNELS ==="
 
-# Initialize Pinggy TCP Tunnel (Fast, zero card required)
-Write-Host "Installing and starting Pinggy TCP tunnel..."
+# Initialize Pinggy TCP Tunnel via npx.cmd with full path resolution
+Write-Host "Starting Pinggy TCP tunnel daemon..."
 $pinggyHost = ""
 try {
-    npm install -g pinggy | Out-Null
-    pinggy --type tcp -l 3389 --b
-    Start-Sleep -Seconds 4
-    $psOut = pinggy ps | Out-String
-    Write-Host "Pinggy PS Status:"
-    Write-Host $psOut
+    # Run npx.cmd pinggy directly in background
+    $pinggyProc = Start-Process -FilePath "npx.cmd" -ArgumentList "-y", "pinggy", "--type", "tcp", "-l", "3389", "--b" -PassThru
+    Start-Sleep -Seconds 8
+    
+    # Check status
+    $psOut = & npx.cmd -y pinggy ps | Out-String
+    Write-Host "Pinggy PS Output: $psOut"
     if ($psOut -match 'tcp://([^\s]+)') {
         $pinggyHost = $matches[1]
         Write-Host "SUCCESS: Pinggy Live Host: $pinggyHost"
@@ -75,31 +81,15 @@ try {
     Write-Host "Pinggy error: $_"
 }
 
-# Also Initialize Serveo tunnel as reliable backup
-$serveoHost = ""
-try {
-    Write-Host "Launching Serveo secondary tunnel..."
-    $serveoLog = "$env:TEMP\serveo.log"
-    Start-Process -FilePath "ssh" -ArgumentList "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=NUL", "-o", "ServerAliveInterval=15", "-R", "0:localhost:3389", "serveo.net" -RedirectStandardOutput $serveoLog
-    Start-Sleep -Seconds 4
-    if (Test-Path $serveoLog) {
-        $sContent = Get-Content $serveoLog -Raw
-        if ($sContent -match 'serveousercontent\.com:([0-9]+)') {
-            $serveoHost = "serveousercontent.com:$($matches[1])"
-            Write-Host "SUCCESS: Serveo Live Host: $serveoHost"
-        }
-    }
-} catch {
-    Write-Host "Serveo error: $_"
-}
-
 # Also Initialize Ngrok (If account verified)
 $ngrokHost = ""
 if (-not [string]::IsNullOrWhiteSpace($NgrokToken)) {
     try {
         $ngrokZip = "$env:TEMP\ngrok.zip"
-        Invoke-WebRequest -Uri "https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-windows-amd64.zip" -OutFile $ngrokZip
-        Expand-Archive -Path $ngrokZip -DestinationPath "$env:TEMP\ngrok" -Force
+        if (!(Test-Path $ngrokZip)) {
+            Invoke-WebRequest -Uri "https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-windows-amd64.zip" -OutFile $ngrokZip
+            Expand-Archive -Path $ngrokZip -DestinationPath "$env:TEMP\ngrok" -Force
+        }
         & "$env:TEMP\ngrok\ngrok.exe" config add-authtoken "$NgrokToken"
         Start-Process -FilePath "$env:TEMP\ngrok\ngrok.exe" -ArgumentList "tcp", "3389", "--log=stdout" -RedirectStandardOutput "$env:TEMP\ngrok.log"
         Start-Sleep -Seconds 3
@@ -119,14 +109,30 @@ if (-not [string]::IsNullOrWhiteSpace($NgrokToken)) {
     }
 }
 
-# Determine Primary Address
+# Secondary fallback: Serveo (keep alive via active ssh process)
+$serveoHost = ""
+if ([string]::IsNullOrWhiteSpace($pinggyHost) -and [string]::IsNullOrWhiteSpace($ngrokHost)) {
+    Write-Host "Starting Serveo fallback..."
+    $serveoLog = "$env:TEMP\serveo.log"
+    Start-Process -FilePath "ssh" -ArgumentList "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=NUL", "-o", "ServerAliveInterval=10", "-R", "0:localhost:3389", "serveo.net" -RedirectStandardOutput $serveoLog
+    Start-Sleep -Seconds 4
+    if (Test-Path $serveoLog) {
+        $sContent = Get-Content $serveoLog -Raw
+        if ($sContent -match 'serveousercontent\.com:([0-9]+)') {
+            $serveoHost = "serveousercontent.com:$($matches[1])"
+            Write-Host "SUCCESS: Serveo Live Host: $serveoHost"
+        }
+    }
+}
+
+# Determine Primary Connection
 $PRIMARY_CONNECTION = ""
 if (-not [string]::IsNullOrWhiteSpace($pinggyHost)) {
     $PRIMARY_CONNECTION = $pinggyHost
-} elseif (-not [string]::IsNullOrWhiteSpace($serveoHost)) {
-    $PRIMARY_CONNECTION = $serveoHost
 } elseif (-not [string]::IsNullOrWhiteSpace($ngrokHost)) {
     $PRIMARY_CONNECTION = $ngrokHost
+} else {
+    $PRIMARY_CONNECTION = $serveoHost
 }
 
 # Write connection details to file
@@ -135,8 +141,8 @@ $connLines = @(
     "WINDOWS SERVER 2022 RUNTIME READY FOR WINDOWS APP",
     "Primary PC Address: $PRIMARY_CONNECTION",
     "Pinggy Address    : $pinggyHost",
-    "Serveo Address    : $serveoHost",
     "Ngrok Address     : $ngrokHost",
+    "Serveo Address    : $serveoHost",
     "Username          : runneradmin",
     "Password          : $TargetPassword",
     "Local Port 3389   : $(if ($localPortTest.TcpTestSucceeded) { 'LISTENING' } else { 'FAILED' })",
