@@ -24,156 +24,19 @@ jobs:
       - name: 1. Checkout repository
         uses: actions/checkout@v4
 
-      - name: 2. Configure Windows High-Performance Remote Services
+      - name: 2. Configure Windows Remote Desktop and Multi-Tunnel
         shell: powershell
         run: |
-          Write-Host "=== CONFIGURING SYSTEM SERVICES ==="
-          
-          # Enable Remote Desktop
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
-          Enable-NetFirewallRule -DisplayGroup "Remote Desktop" -ErrorAction SilentlyContinue
-          
-          # Disable NLA for maximum client compatibility (Windows App, Mobile, Web)
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0
+          .\scripts\setup_rdp.ps1 -TargetPassword "${{ github.event.inputs.password || 'paneer123' }}" -NgrokToken "${{ github.event.inputs.ngrok_token || '' }}"
 
-          # Enable Low-Latency RemoteFX, AVC444, and UDP Accelerated Transport
-          $tsPath = "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services"
-          if (!(Test-Path $tsPath)) { New-Item -Path $tsPath -Force | Out-Null }
-          Set-ItemProperty -Path $tsPath -Name "fEnableRemoteFXAdvancedRemoteFX" -Value 1 -Type DWord
-          Set-ItemProperty -Path $tsPath -Name "SelectNetworkDetect" -Value 1 -Type DWord
-          Set-ItemProperty -Path $tsPath -Name "SelectTransportProtocol" -Value 1 -Type DWord
-          Set-ItemProperty -Path $tsPath -Name "AVC444ModePreferred" -Value 1 -Type DWord
-          Set-ItemProperty -Path $tsPath -Name "MinCompressionLevel" -Value 1 -Type DWord
-
-          # Configure User Credentials
-          $targetPass = "${{ github.event.inputs.password }}"
-          if ([string]::IsNullOrWhiteSpace($targetPass)) { $targetPass = "paneer123" }
-          
-          $secPass = ConvertTo-SecureString $targetPass -AsPlainText -Force
-          $adminUser = Get-LocalUser -Name "runneradmin" -ErrorAction SilentlyContinue
-          if ($adminUser) {
-            $adminUser | Set-LocalUser -Password $secPass
-          } else {
-            New-LocalUser -Name "runneradmin" -Password $secPass -FullName "Runner Admin" -Description "Automated Test Administrator"
-            Add-LocalGroupMember -Group "Administrators" -Member "runneradmin"
-            Add-LocalGroupMember -Group "Remote Desktop Users" -Member "runneradmin"
-          }
-
-          # Disable Sleep, Hibernation, and Screen Saver
-          powercfg -change -standby-timeout-ac 0
-          powercfg -change -monitor-timeout-ac 0
-          Set-ItemProperty -Path 'HKCU:\Control Panel\Desktop' -Name "ScreenSaveActive" -Value "0"
-          
-          Write-Host "Windows Remote Desktop services active and tuned."
-
-      - name: 3. Initialize Secure Low-Latency Multi-Tunnel
-        shell: powershell
-        run: |
-          $targetPass = "${{ github.event.inputs.password }}"
-          if ([string]::IsNullOrWhiteSpace($targetPass)) { $targetPass = "paneer123" }
-
-          $ngrokToken = "${{ github.event.inputs.ngrok_token }}"
-          $RDP_HOST = ""
-          $RDP_PORT = ""
-
-          # ── Setup Pinggy TCP Tunnel ──────────────────────────────────────────
-          Write-Host "Starting Primary Pinggy TCP Tunnel (port 3389)..."
-          $pinggyLog = "$env:TEMP\pinggy.log"
-          Remove-Item $pinggyLog -ErrorAction SilentlyContinue
-
-          # Run SSH tunnel via Windows OpenSSH client
-          $sshProcess = Start-Process -FilePath "ssh" -ArgumentList "-T", "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=NUL", "-o", "ServerAliveInterval=15", "-p", "443", "-R0:localhost:3389", "tcp@a.pinggy.io" -RedirectStandardOutput $pinggyLog -RedirectStandardError "$env:TEMP\pinggy_err.log" -PassThru
-
-          Start-Sleep -Seconds 4
-          $pinggyHost = ""
-          for ($i = 0; $i -lt 30; $i++) {
-            if (Test-Path $pinggyLog) {
-              $logContent = Get-Content $pinggyLog -Raw
-              if ($logContent -match 'tcp://([a-zA-Z0-9\.\-]+):([0-9]+)') {
-                $pinggyHost = "$($matches[1]):$($matches[2])"
-                Write-Host "Found Pinggy Tunnel: $pinggyHost"
-                break
-              }
-            }
-            Start-Sleep -Seconds 1
-          }
-
-          # ── Setup Ngrok TCP if token provided ───────────────────────────────
-          $ngrokHost = ""
-          if (-not [string]::IsNullOrWhiteSpace($ngrokToken)) {
-            Write-Host "Starting Secondary Ngrok TCP Tunnel..."
-            $ngrokZip = "$env:TEMP\ngrok.zip"
-            Invoke-WebRequest -Uri "https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-windows-amd64.zip" -OutFile $ngrokZip
-            Expand-Archive -Path $ngrokZip -DestinationPath "$env:TEMP\ngrok" -Force
-            & "$env:TEMP\ngrok\ngrok.exe" config add-authtoken $ngrokToken
-            Start-Process -FilePath "$env:TEMP\ngrok\ngrok.exe" -ArgumentList "tcp", "3389", "--log=stdout" -RedirectStandardOutput "$env:TEMP\ngrok.log"
-            Start-Sleep -Seconds 3
-            for ($i = 0; $i -lt 15; $i++) {
-              try {
-                $tunnels = (Invoke-RestMethod -Uri "http://127.0.0.1:4040/api/tunnels" -ErrorAction Stop).tunnels
-                if ($tunnels -and $tunnels[0].public_url) {
-                  $ngrokHost = $tunnels[0].public_url -replace 'tcp://', ''
-                  Write-Host "Found Ngrok Tunnel: $ngrokHost"
-                  break
-                }
-              } catch {}
-              Start-Sleep -Seconds 1
-            }
-          }
-
-          # Prioritize Pinggy TCP (Instant, no token) or Ngrok
-          $PRIMARY_CONNECTION = ""
-          if (-not [string]::IsNullOrWhiteSpace($pinggyHost)) {
-            $PRIMARY_CONNECTION = $pinggyHost
-          } elseif (-not [string]::IsNullOrWhiteSpace($ngrokHost)) {
-            $PRIMARY_CONNECTION = $ngrokHost
-          }
-
-          # Output connection details
-          $connInfo = @"
-==========================================================================
-WINDOWS SERVER 2022 RUNTIME READY FOR WINDOWS APP
-Primary PC Address: $PRIMARY_CONNECTION
-Pinggy Host       : $pinggyHost
-Ngrok Host        : $ngrokHost
-Username          : runneradmin
-Password          : $targetPass
-==========================================================================
-"@
-          Write-Host $connInfo
-          Set-Content -Path "connection_info.txt" -Value $connInfo
-
-          # Write to GitHub Step Summary
-          $summary = @"
-## 🪟 Windows Server 2022 Remote PC Ready
-
-### 🚀 Connection Details for "Windows App":
-| Setting | Value |
-|---|---|
-| **PC name (Host:Port)** | \`$PRIMARY_CONNECTION\` |
-| **User account** | \`runneradmin\` |
-| **Password** | \`$targetPass\` |
-
----
-### 📱 How to Connect in "Windows App" (Microsoft Official):
-1. Open **Windows App**.
-2. Click **Add a remote PC** (or **+** button).
-3. In **PC name**, paste: \`$PRIMARY_CONNECTION\`
-4. In **User account**, choose **Add user account**:
-   - Username: \`runneradmin\`
-   - Password: \`$targetPass\`
-5. Click **Connect**!
-"@
-          Set-Content -Path $env:GITHUB_STEP_SUMMARY -Value $summary
-
-      - name: 4. Export Connection Info Artifact
+      - name: 3. Export Connection Info Artifact
         uses: actions/upload-artifact@v4
         with:
           name: windows-connection-info
           path: connection_info.txt
           retention-days: 1
 
-      - name: 5. Keep Session Active
+      - name: 4. Maintain Active Session
         shell: powershell
         run: |
           Write-Host "Windows session active for up to 6 hours. Cancel workflow anytime to stop."
