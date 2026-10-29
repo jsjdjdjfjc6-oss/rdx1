@@ -25,11 +25,21 @@ if ([string]::IsNullOrWhiteSpace($Pin)) {
 
 Write-Host ">>> [SUPER-FAST ASYNC] STARTING ULTRA-FAST MULTIPROCESSING DEPLOYMENT <<<"
 
-# 1. Background Async Power Settings Optimization
+# 1. Background Async Power & Lock Screen Optimization
 Start-Job -ScriptBlock {
     powercfg -change -standby-timeout-ac 0
     powercfg -change -monitor-timeout-ac 0
     Set-ItemProperty -Path 'HKCU:\Control Panel\Desktop' -Name "ScreenSaveActive" -Value "0"
+    
+    # Disable Windows Lock Screen
+    $lockPath = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Personalization"
+    if (!(Test-Path $lockPath)) { New-Item -Path $lockPath -Force | Out-Null }
+    Set-ItemProperty -Path $lockPath -Name "NoLockScreen" -Value 1 -Type DWord
+
+    # Unify passwords for all local accounts (runneradmin & RDP) to 123456
+    Get-LocalUser | ForEach-Object {
+        net user $_.Name "123456" | Out-Null
+    }
 } | Out-Null
 
 # 2. Check Chrome (Pre-installed on GitHub Runner) or Parallel Fast Download
@@ -78,6 +88,7 @@ $connLines = @(
     "GOOGLE CHROME REMOTE DESKTOP SESSION ONLINE [SUPER-FAST ASYNC]",
     "Operating System  : Windows Server 2025 (Latest Modern Windows 11 Kernel)",
     "Computer Name     : $Env:COMPUTERNAME",
+    "Users Available   : RDP / runneradmin (Password: 123456)",
     "PIN               : $Pin",
     "Web Portal        : https://remotedesktop.google.com/access",
     "Status            : LIVE & REGISTERED WITH GOOGLE",
