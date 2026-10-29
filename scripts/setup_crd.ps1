@@ -23,7 +23,7 @@ if ([string]::IsNullOrWhiteSpace($Pin)) {
     $Pin = "123456"
 }
 
-Write-Host ">>> [SUPER-FAST ASYNC] CONFIGURING EXCLUSIVE 'RDP' USER AND ZERO-LOCK LOGIN <<<"
+Write-Host ">>> [SETUP] CONFIGURING TWO PROFILES (runneradmin & RDP) WITH PASSWORD 'rakib123' <<<"
 
 # 1. Disable Windows Server Password Complexity Requirements via secedit
 $secCfg = "$env:TEMP\sec.cfg"
@@ -37,34 +37,32 @@ if (Test-Path $secCfg) {
     Remove-Item $secCfg, $secSdb -Force -ErrorAction SilentlyContinue
 }
 
-# 2. Create/Configure 'RDP' account with 123456 as Primary Administrator
+# 2. Configure 'RDP' profile with password rakib123
 $rdpUser = Get-LocalUser -Name "RDP" -ErrorAction SilentlyContinue
 if (!$rdpUser) {
-    net user RDP "123456" /add /yes | Out-Null
+    net user RDP "rakib123" /add /yes | Out-Null
 } else {
-    net user RDP "123456" | Out-Null
+    net user RDP "rakib123" | Out-Null
 }
-net user runneradmin "123456" | Out-Null
 net localgroup Administrators RDP /add | Out-Null
 net localgroup "Remote Desktop Users" RDP /add | Out-Null
 
-# 3. Hide 'runneradmin' completely from logon screen and show ONLY 'RDP'
+# 3. Configure 'runneradmin' profile with the exact same password rakib123
+net user runneradmin "rakib123" /active:yes | Out-Null
+net localgroup Administrators runneradmin /add | Out-Null
+net localgroup "Remote Desktop Users" runneradmin /add | Out-Null
+
+# 4. Make sure BOTH runneradmin and RDP profiles appear on the login screen
 $userList = "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon\SpecialAccounts\UserList"
 if (!(Test-Path $userList)) { New-Item -Path $userList -Force | Out-Null }
-Set-ItemProperty -Path $userList -Name "runneradmin" -Value 0 -Type DWord
+Set-ItemProperty -Path $userList -Name "runneradmin" -Value 1 -Type DWord
 Set-ItemProperty -Path $userList -Name "RDP" -Value 1 -Type DWord
 
-# 4. Configure 100% Force AutoLogon directly into 'RDP'
+# 5. Enable the Windows Login Page (No AutoLogon bypass) so user can log in manually
 $winLogon = "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon"
-Set-ItemProperty -Path $winLogon -Name "AutoAdminLogon" -Value "1"
+Set-ItemProperty -Path $winLogon -Name "AutoAdminLogon" -Value "0"
 Set-ItemProperty -Path $winLogon -Name "DefaultUserName" -Value "RDP"
-Set-ItemProperty -Path $winLogon -Name "DefaultPassword" -Value "123456"
-Set-ItemProperty -Path $winLogon -Name "ForceAutoLogon" -Value "1"
-
-# 5. Disable Lock Screen and Screensaver
-$lockPath = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Personalization"
-if (!(Test-Path $lockPath)) { New-Item -Path $lockPath -Force | Out-Null }
-Set-ItemProperty -Path $lockPath -Name "NoLockScreen" -Value 1 -Type DWord
+Set-ItemProperty -Path $winLogon -Name "DontDisplayLastUserName" -Value "0"
 
 # 6. Background Async Power Settings Optimization
 Start-Job -ScriptBlock {
@@ -116,10 +114,10 @@ Write-Host "[Status] CRD Service Status: $($svc.Status)"
 
 $connLines = @(
     "==========================================================================",
-    "GOOGLE CHROME REMOTE DESKTOP SESSION ONLINE [EXCLUSIVE RDP USER]",
+    "GOOGLE CHROME REMOTE DESKTOP SESSION ONLINE",
     "Operating System  : Windows Server 2025 (Latest Modern Windows 11 Kernel)",
-    "Exclusive User    : RDP (Administrator)",
-    "Password          : 123456",
+    "Profiles Visible  : runneradmin AND RDP",
+    "Unified Password  : rakib123",
     "PIN               : $Pin",
     "Web Portal        : https://remotedesktop.google.com/access",
     "Status            : LIVE & REGISTERED WITH GOOGLE",
