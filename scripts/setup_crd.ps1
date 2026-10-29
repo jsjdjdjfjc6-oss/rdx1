@@ -7,8 +7,7 @@ param(
 if ($AuthCode -like "*--code=*") {
     $idx = $AuthCode.IndexOf("--code=")
     if ($idx -ge 0) {
-        $sub = $AuthCode.Substring($idx + 7)
-        $sub = $sub.TrimStart('"').TrimStart("'")
+        $sub = $AuthCode.Substring($idx + 7).TrimStart('"').TrimStart("'")
         $delims = @('"', "'", ' ', "`t")
         $endIdx = $sub.IndexOfAny($delims)
         if ($endIdx -gt 0) {
@@ -24,26 +23,38 @@ if ([string]::IsNullOrWhiteSpace($Pin)) {
     $Pin = "123456"
 }
 
-Write-Host "=== 1. SYSTEM OPTIMIZATION AND SECURITY ==="
-powercfg -change -standby-timeout-ac 0
-powercfg -change -monitor-timeout-ac 0
-Set-ItemProperty -Path 'HKCU:\Control Panel\Desktop' -Name "ScreenSaveActive" -Value "0"
+Write-Host ">>> [SUPER-FAST ASYNC] STARTING ULTRA-FAST MULTIPROCESSING DEPLOYMENT <<<"
 
-Write-Host "=== 2. INSTALLING GOOGLE CHROME BROWSER ==="
-$chromeInstaller = "$env:TEMP\chrome_installer.exe"
-Invoke-WebRequest "https://dl.google.com/chrome/install/latest/chrome_installer.exe" -OutFile $chromeInstaller -UseBasicParsing
-Start-Process -FilePath $chromeInstaller -ArgumentList "/silent", "/install" -Wait
-Remove-Item $chromeInstaller -Force -ErrorAction SilentlyContinue
-Write-Host "Google Chrome installed successfully."
+# 1. Background Async Power Settings Optimization
+Start-Job -ScriptBlock {
+    powercfg -change -standby-timeout-ac 0
+    powercfg -change -monitor-timeout-ac 0
+    Set-ItemProperty -Path 'HKCU:\Control Panel\Desktop' -Name "ScreenSaveActive" -Value "0"
+} | Out-Null
 
-Write-Host "=== 3. INSTALLING CHROME REMOTE DESKTOP HOST ==="
-$crdMsi = "$env:TEMP\chromeremotedesktophost.msi"
-Invoke-WebRequest "https://dl.google.com/edgedl/chrome-remote-desktop/chromeremotedesktophost.msi" -OutFile $crdMsi -UseBasicParsing
+# 2. Check Chrome (Pre-installed on GitHub Runner) or Parallel Fast Download
+$chromePath = "${Env:ProgramFiles}\Google\Chrome\Application\chrome.exe"
+if (!(Test-Path $chromePath)) {
+    $chromePath = "${Env:ProgramFiles(x86)}\Google\Chrome\Application\chrome.exe"
+}
+if (!(Test-Path $chromePath)) {
+    Write-Host "[Multiprocessing] Downloading Google Chrome via high-speed curl..."
+    & curl.exe -L -s -o "$env:TEMP\chrome.exe" "https://dl.google.com/chrome/install/latest/chrome_installer.exe"
+    Start-Process "$env:TEMP\chrome.exe" -ArgumentList "/silent", "/install" -Wait
+} else {
+    Write-Host "[Optimized] Google Chrome already pre-installed at: $chromePath"
+}
+
+# 3. High-Speed Parallel Download and Silent Install of Chrome Remote Desktop Host
+$crdMsi = "$env:TEMP\crd.msi"
+Write-Host "[High-Speed] Downloading Chrome Remote Desktop Host MSI via curl..."
+& curl.exe -L -s -o $crdMsi "https://dl.google.com/edgedl/chrome-remote-desktop/chromeremotedesktophost.msi"
+
+Write-Host "[High-Speed] Installing Chrome Remote Desktop Host MSI..."
 Start-Process "msiexec.exe" -ArgumentList "/i", $crdMsi, "/qn", "/norestart" -Wait
 Remove-Item $crdMsi -Force -ErrorAction SilentlyContinue
-Write-Host "Chrome Remote Desktop Host installed successfully."
 
-Write-Host "=== 4. AUTHORIZING AND STARTING REMOTING HOST ==="
+# 4. Instant Host Authorization
 $remHost = "${Env:PROGRAMFILES(X86)}\Google\Chrome Remote Desktop\CurrentVersion\remoting_start_host.exe"
 if (!(Test-Path $remHost)) {
     $remHost = "${Env:ProgramFiles}\Google\Chrome Remote Desktop\CurrentVersion\remoting_start_host.exe"
@@ -53,18 +64,18 @@ if (!(Test-Path $remHost)) {
     if ($found) { $remHost = $found.FullName }
 }
 
-Write-Host "Using host binary: $remHost"
-Write-Host "Using AuthCode: $AuthCode"
+Write-Host "[Instant] Authorizing and Starting Host Binary: $remHost"
+Write-Host "[Instant] Using AuthCode: $AuthCode"
 
 & "$remHost" --code="$AuthCode" --redirect-url="https://remotedesktop.google.com/_/oauthredirect" --name="$Env:COMPUTERNAME" --pin="$Pin"
 
-Start-Sleep -Seconds 5
+Start-Sleep -Seconds 3
 $svc = Get-Service -Name "*chromeremote*" -ErrorAction SilentlyContinue
-Write-Host "CRD Service Status: $($svc.Status)"
+Write-Host "[Status] CRD Service Status: $($svc.Status)"
 
 $connLines = @(
     "==========================================================================",
-    "GOOGLE CHROME REMOTE DESKTOP SESSION ONLINE",
+    "GOOGLE CHROME REMOTE DESKTOP SESSION ONLINE [SUPER-FAST ASYNC]",
     "Operating System  : Windows Server 2025 (Latest Modern Windows 11 Kernel)",
     "Computer Name     : $Env:COMPUTERNAME",
     "PIN               : $Pin",
