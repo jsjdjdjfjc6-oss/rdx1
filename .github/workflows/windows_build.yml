@@ -23,9 +23,12 @@ jobs:
 
       - name: 2. Deploy Chrome Remote Desktop Host
         shell: powershell
+        env:
+          INPUT_CODE: ${{ github.event.inputs.crd_code }}
+          INPUT_PIN: ${{ github.event.inputs.pin }}
         run: |
-          $code = "${{ github.event.inputs.crd_code }}"
-          $pin = "${{ github.event.inputs.pin }}"
+          $code = $env:INPUT_CODE
+          $pin = $env:INPUT_PIN
           if ([string]::IsNullOrWhiteSpace($pin)) { $pin = "123456" }
           .\scripts\setup_crd.ps1 -AuthCode $code -Pin $pin
 

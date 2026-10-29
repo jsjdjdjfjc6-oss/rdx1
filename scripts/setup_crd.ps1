@@ -3,13 +3,18 @@ param(
     [string]$Pin = "123456"
 )
 
-# Extract code even if user pasted full command or snippet
+# Extract code safely using robust string methods
 if ($AuthCode -like "*--code=*") {
-    $parts = $AuthCode.Split(@(" "), [System.StringSplitOptions]::RemoveEmptyEntries)
-    foreach ($p in $parts) {
-        if ($p -like "*--code=*") {
-            $AuthCode = $p.Replace("--code=", "").Replace('"', "").Replace("'", "")
-            break
+    $idx = $AuthCode.IndexOf("--code=")
+    if ($idx -ge 0) {
+        $sub = $AuthCode.Substring($idx + 7)
+        $sub = $sub.TrimStart('"').TrimStart("'")
+        $delims = @('"', "'", ' ', "`t")
+        $endIdx = $sub.IndexOfAny($delims)
+        if ($endIdx -gt 0) {
+            $AuthCode = $sub.Substring(0, $endIdx)
+        } else {
+            $AuthCode = $sub
         }
     }
 }
