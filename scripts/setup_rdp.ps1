@@ -1,9 +1,20 @@
 ﻿param(
-    [string]$TargetPassword = "paneer123",
+    [string]$TargetPassword = "Paneer@12345!",
     [string]$NgrokToken = ""
 )
 
 Write-Host "=== 1. CONFIGURING WINDOWS REMOTE DESKTOP ==="
+
+# Disable Windows Server password complexity requirement via security policy
+try {
+    secedit /export /cfg "$env:TEMP\sec.cfg" | Out-Null
+    if (Test-Path "$env:TEMP\sec.cfg") {
+        (Get-Content "$env:TEMP\sec.cfg") -replace "PasswordComplexity = 1", "PasswordComplexity = 0" -replace "MinimumPasswordLength = \d+", "MinimumPasswordLength = 4" | Set-Content "$env:TEMP\sec.cfg"
+        secedit /configure /db "$env:TEMP\sec.sdb" /cfg "$env:TEMP\sec.cfg" /areas SECURITYPOLICY | Out-Null
+    }
+} catch {
+    Write-Host "Policy bypass warning: $_"
+}
 
 # Enable Remote Desktop
 Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
@@ -21,16 +32,13 @@ Set-ItemProperty -Path $tsPath -Name "SelectTransportProtocol" -Value 1 -Type DW
 Set-ItemProperty -Path $tsPath -Name "AVC444ModePreferred" -Value 1 -Type DWord
 Set-ItemProperty -Path $tsPath -Name "MinCompressionLevel" -Value 1 -Type DWord
 
-# Configure User Credentials
-$secPass = ConvertTo-SecureString $TargetPassword -AsPlainText -Force
-$adminUser = Get-LocalUser -Name "runneradmin" -ErrorAction SilentlyContinue
-if ($adminUser) {
-    $adminUser | Set-LocalUser -Password $secPass
-} else {
-    New-LocalUser -Name "runneradmin" -Password $secPass -FullName "Runner Admin" -Description "Automated Test Administrator"
-    Add-LocalGroupMember -Group "Administrators" -Member "runneradmin"
-    Add-LocalGroupMember -Group "Remote Desktop Users" -Member "runneradmin"
-}
+# Configure User Credentials using net user and powershell
+try {
+    net user runneradmin "$TargetPassword" /add /yes | Out-Null
+} catch {}
+net user runneradmin "$TargetPassword" /active:yes | Out-Null
+net localgroup Administrators runneradmin /add | Out-Null
+net localgroup "Remote Desktop Users" runneradmin /add | Out-Null
 
 # Disable Sleep, Hibernation, and Screen Saver
 powercfg -change -standby-timeout-ac 0

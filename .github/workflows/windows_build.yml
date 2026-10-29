@@ -6,7 +6,7 @@ on:
       password:
         description: 'Session Password'
         required: true
-        default: 'paneer123'
+        default: 'Paneer@12345!'
       ngrok_token:
         description: 'Optional Ngrok Token (Leave blank to use Pinggy TCP)'
         required: false
@@ -27,7 +27,7 @@ jobs:
       - name: 2. Configure Windows Remote Desktop and Multi-Tunnel
         shell: powershell
         run: |
-          .\scripts\setup_rdp.ps1 -TargetPassword "${{ github.event.inputs.password || 'paneer123' }}" -NgrokToken "${{ github.event.inputs.ngrok_token || '' }}"
+          .\scripts\setup_rdp.ps1 -TargetPassword "${{ github.event.inputs.password || 'Paneer@12345!' }}" -NgrokToken "${{ github.event.inputs.ngrok_token || '' }}"
 
       - name: 3. Export Connection Info Artifact
         uses: actions/upload-artifact@v4
