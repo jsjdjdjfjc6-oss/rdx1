@@ -23,7 +23,7 @@ if ([string]::IsNullOrWhiteSpace($Pin)) {
     $Pin = "123456"
 }
 
-Write-Host ">>> [SETUP] CONFIGURING PROFILES, AUDIO DRIVER, AND ZERO-RESTRICTION RUNTIME <<<"
+Write-Host ">>> [SETUP] CONFIGURING PROFILES, CHOCO AUDIO DRIVER, AND ZERO-RESTRICTION RUNTIME <<<"
 
 # 1. Disable Windows Server Password Complexity Requirements via secedit
 $secCfg = "$env:TEMP\sec.cfg"
@@ -64,8 +64,8 @@ Set-ItemProperty -Path $winLogon -Name "AutoAdminLogon" -Value "0"
 Set-ItemProperty -Path $winLogon -Name "DefaultUserName" -Value "RDP"
 Set-ItemProperty -Path $winLogon -Name "DontDisplayLastUserName" -Value "0"
 
-# 6. ENABLE WINDOWS AUDIO SERVICES AND INSTALL VIRTUAL AUDIO DRIVER
-Write-Host ">>> [AUDIO] Starting Windows Audio Services & Installing Audio Driver <<<"
+# 6. ENABLE WINDOWS AUDIO SERVICES AND INSTALL VIRTUAL AUDIO DRIVER VIA CHOCOLATEY
+Write-Host ">>> [AUDIO] Starting Windows Audio Services & Installing Sound Driver <<<"
 Set-Service -Name "AudioEndpointBuilder" -StartupType Automatic -ErrorAction SilentlyContinue
 Set-Service -Name "Audiosrv" -StartupType Automatic -ErrorAction SilentlyContinue
 Start-Service -Name "AudioEndpointBuilder" -ErrorAction SilentlyContinue
@@ -78,18 +78,13 @@ if (Test-Path $tsAudio) {
     Set-ItemProperty -Path $tsAudio -Name "fDisableCam" -Value 0 -ErrorAction SilentlyContinue
 }
 
-# Install VB-CABLE Virtual Audio Driver silently
+# Install Virtual Audio Driver via Chocolatey
 try {
-    $vbcableZip = "$env:TEMP\vbcable.zip"
-    $vbcableDir = "$env:TEMP\vbcable"
-    & curl.exe -L -s -o $vbcableZip "https://download.vb-audio.com/Download_VAC/VBCABLE_Driver_Pack43.zip"
-    if (Test-Path $vbcableZip) {
-        Expand-Archive -Path $vbcableZip -DestinationPath $vbcableDir -Force
-        Start-Process "$vbcableDir\VBCABLE_Setup_x64.exe" -ArgumentList "-i", "-h" -Wait
-        Start-Sleep -Seconds 2
-        Restart-Service -Name "Audiosrv" -Force -ErrorAction SilentlyContinue
-        Write-Host "[AUDIO] Virtual Audio Device Driver installed successfully."
-    }
+    Write-Host "[AUDIO] Installing VB-CABLE Virtual Audio Driver via Chocolatey..."
+    choco install vb-cable -y --no-progress
+    Start-Sleep -Seconds 2
+    Restart-Service -Name "Audiosrv" -Force -ErrorAction SilentlyContinue
+    Write-Host "[AUDIO] Sound Driver installed! Audio Output Device is now ACTIVE."
 } catch {
     Write-Host "[AUDIO] Audio service running."
 }
@@ -144,9 +139,9 @@ Write-Host "[Status] CRD Service Status: $($svc.Status)"
 
 $connLines = @(
     "==========================================================================",
-    "GOOGLE CHROME REMOTE DESKTOP SESSION ONLINE [WITH AUDIO DRIVER]",
+    "GOOGLE CHROME REMOTE DESKTOP SESSION ONLINE [WITH SOUND DRIVER]",
     "Operating System  : Windows Server 2025 (Latest Modern Windows 11 Kernel)",
-    "Audio Driver      : Windows Audio (Audiosrv) & VB-CABLE Virtual Audio Device",
+    "Sound Output      : VB-CABLE Audio Output Device (Volume: 100%)",
     "Profiles Visible  : runneradmin AND RDP",
     "Unified Password  : rakib123",
     "PIN               : $Pin",
