@@ -1,0 +1,17 @@
+﻿==========================================================================
+WINDOWS SERVER 2022 RUNTIME READY FOR WINDOWS APP
+Primary PC Address: serveousercontent.com:22525
+Pinggy Address    : 
+Ngrok Address     : 
+Serveo Address    : serveousercontent.com:22525
+Username          : runneradmin
+Password          : Paneer@12345!
+Local Port 3389   : LISTENING
+==========================================================================
+CONNECTION INSTRUCTIONS:
+1. Open official Microsoft Windows App (or Remote Desktop Connection / mstsc)
+2. Click '+' -> Add PC
+3. PC Name: serveousercontent.com:22525
+4. User Account: runneradmin
+5. Password: Paneer@12345!
+==========================================================================

@@ -1,0 +1,15 @@
+﻿==========================================================================
+WINDOWS SERVER 2022 RUNTIME READY FOR WINDOWS APP VIA PLAYIT
+Agent Status      : CONNECTED TO PLAYIT.GG DASHBOARD
+Username          : runneradmin
+Password          : Paneer@12345!
+Local Port 3389   : LISTENING
+==========================================================================
+CONNECTION INSTRUCTIONS:
+1. Look at your Playit Dashboard in your browser.
+2. It will show 'Agent Connected!'
+3. Add Tunnel -> Type: Custom TCP -> Port: 3389
+4. Copy your assigned 'something.ply.gg:port' address
+5. In Windows App (or mstsc.exe): Connect to that address!
+6. User: runneradmin | Password: Paneer@12345!
+==========================================================================

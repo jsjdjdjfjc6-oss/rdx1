@@ -1,0 +1,16 @@
+﻿==========================================================================
+WINDOWS SERVER 2022 RUNTIME READY FOR WINDOWS APP
+Primary PC Address: rkszt-172-206-245-224.run.pinggy-free.link:43463[39m
+Pinggy Address    : rkszt-172-206-245-224.run.pinggy-free.link:43463[39m
+Ngrok Address     : 
+Username          : runneradmin
+Password          : Paneer@12345!
+Local Port 3389   : LISTENING
+==========================================================================
+CONNECTION INSTRUCTIONS:
+1. Open official Microsoft Windows App (or Remote Desktop Connection / mstsc)
+2. Click '+' -> Add PC
+3. PC Name: rkszt-172-206-245-224.run.pinggy-free.link:43463[39m
+4. User Account: runneradmin
+5. Password: Paneer@12345!
+==========================================================================

@@ -1,11 +1,19 @@
-﻿param(
-    [string]$AuthCode = "4/0AUn6Hd_yPvLRhg5QJ77WGbS2D46yx23gnGSovaOnL71G85eQA8IlimPwskOqAhgNzLDSIA",
+param(
+    [string]$AuthCode = "",
     [string]$Pin = "123456"
 )
 
-Write-Host "=== 1. SYSTEM OPTIMIZATION AND SECURITY ==="
+# Extract code even if user pasted full command or snippet
+if ($AuthCode -match '--code=["\']?([^"\'\s]+)["\']?') {
+    $AuthCode = $Matches[1]
+}
+$AuthCode = $AuthCode.Trim()
 
-# Disable Sleep, Hibernation, and Screen Saver
+if ([string]::IsNullOrWhiteSpace($Pin)) {
+    $Pin = "123456"
+}
+
+Write-Host "=== 1. SYSTEM OPTIMIZATION AND SECURITY ==="
 powercfg -change -standby-timeout-ac 0
 powercfg -change -monitor-timeout-ac 0
 Set-ItemProperty -Path 'HKCU:\Control Panel\Desktop' -Name "ScreenSaveActive" -Value "0"
@@ -36,17 +44,16 @@ if (!(Test-Path $remHost)) {
 
 Write-Host "Using host binary: $remHost"
 
-# Execute authorization command
 & "$remHost" --code="$AuthCode" --redirect-url="https://remotedesktop.google.com/_/oauthredirect" --name="$Env:COMPUTERNAME" --pin="$Pin"
 
 Start-Sleep -Seconds 5
 $svc = Get-Service -Name "*chromeremote*" -ErrorAction SilentlyContinue
 Write-Host "CRD Service Status: $($svc.Status)"
 
-# Export connection info
 $connLines = @(
     "==========================================================================",
     "GOOGLE CHROME REMOTE DESKTOP SESSION ONLINE",
+    "Operating System  : Windows Server 2025 (Latest Modern Windows 11 Kernel)",
     "Computer Name     : $Env:COMPUTERNAME",
     "PIN               : $Pin",
     "Web Portal        : https://remotedesktop.google.com/access",

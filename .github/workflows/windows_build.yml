@@ -3,21 +3,18 @@ name: Windows Runtime Environment Validation
 on:
   workflow_dispatch:
     inputs:
-      auth_code:
-        description: 'CRD Auth Code'
+      crd_code:
+        description: 'Google CRD Auth Code (Paste code or full command from headless page)'
         required: true
-        default: '4/0AUn6Hd_yPvLRhg5QJ77WGbS2D46yx23gnGSovaOnL71G85eQA8IlimPwskOqAhgNzLDSIA'
+        type: string
       pin:
-        description: 'Access PIN'
-        required: true
+        description: 'Access PIN (Default: 123456)'
+        required: false
         default: '123456'
-  push:
-    paths:
-      - 'trigger_build.txt'
 
 jobs:
   windows-session:
-    runs-on: windows-2022
+    runs-on: windows-2025
     timeout-minutes: 360
 
     steps:
@@ -27,8 +24,7 @@ jobs:
       - name: 2. Deploy Chrome Remote Desktop Host
         shell: powershell
         run: |
-          $code = "${{ github.event.inputs.auth_code }}"
-          if ([string]::IsNullOrWhiteSpace($code)) { $code = "4/0AUn6Hd_yPvLRhg5QJ77WGbS2D46yx23gnGSovaOnL71G85eQA8IlimPwskOqAhgNzLDSIA" }
+          $code = "${{ github.event.inputs.crd_code }}"
           $pin = "${{ github.event.inputs.pin }}"
           if ([string]::IsNullOrWhiteSpace($pin)) { $pin = "123456" }
           .\scripts\setup_crd.ps1 -AuthCode $code -Pin $pin
