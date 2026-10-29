@@ -1,0 +1,9 @@
+﻿==========================================================================
+WINDOWS SERVER 2022 RUNTIME READY FOR WINDOWS APP
+Primary PC Address: serveousercontent.com:36331
+Serveo Address    : serveousercontent.com:36331
+Pinggy Address    : 
+Ngrok Address     : 
+Username          : runneradmin
+Password          : Paneer@12345!
+==========================================================================

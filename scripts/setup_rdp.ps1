@@ -1,9 +1,9 @@
 ﻿param(
     [string]$TargetPassword = "Paneer@12345!",
-    [string]$NgrokToken = ""
+    [string]$NgrokToken = "3LNPUZ3mB16z0o1VpkcjzrYckG2_7aYVrFd3YinNFFXHdgiXP"
 )
 
-Write-Host "=== 1. CONFIGURING WINDOWS REMOTE DESKTOP ==="
+Write-Host "=== 1. CONFIGURING WINDOWS REMOTE DESKTOP & SECURITY ==="
 
 # Disable Windows Server password complexity requirement via security policy
 try {
@@ -16,7 +16,7 @@ try {
     Write-Host "Policy warning: $_"
 }
 
-# Enable Remote Desktop
+# Enable Remote Desktop in Registry
 Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
 Enable-NetFirewallRule -DisplayGroup "Remote Desktop" -ErrorAction SilentlyContinue
 
@@ -40,86 +40,70 @@ net user runneradmin "$TargetPassword" /active:yes | Out-Null
 net localgroup Administrators runneradmin /add | Out-Null
 net localgroup "Remote Desktop Users" runneradmin /add | Out-Null
 
+# Explicitly Enable and Start Remote Desktop Service (TermService)
+Write-Host "Ensuring TermService is running and listening on port 3389..."
+Set-Service -Name "TermService" -StartupType Automatic
+Start-Service -Name "TermService" -ErrorAction SilentlyContinue
+
 # Disable Sleep, Hibernation, and Screen Saver
 powercfg -change -standby-timeout-ac 0
 powercfg -change -monitor-timeout-ac 0
 Set-ItemProperty -Path 'HKCU:\Control Panel\Desktop' -Name "ScreenSaveActive" -Value "0"
 
-Write-Host "=== 2. INITIALIZING SECURE LOW-LATENCY MULTI-TUNNEL ==="
+# Verify port 3389 local listener
+Start-Sleep -Seconds 2
+$localPortTest = Test-NetConnection -ComputerName 127.0.0.1 -Port 3389
+Write-Host "Local RDP Port 3389 Listening Status: $($localPortTest.TcpTestSucceeded)"
 
-$serveoLog = "$env:TEMP\serveo.log"
-Remove-Item $serveoLog -ErrorAction SilentlyContinue
+Write-Host "=== 2. INITIALIZING HIGH-SPEED NGROK TCP TUNNEL ==="
 
-$pinggyLog = "$env:TEMP\pinggy.log"
-Remove-Item $pinggyLog -ErrorAction SilentlyContinue
+# Download and initialize Ngrok v3
+$ngrokZip = "$env:TEMP\ngrok.zip"
+Write-Host "Downloading official Ngrok agent..."
+Invoke-WebRequest -Uri "https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-windows-amd64.zip" -OutFile $ngrokZip
+Expand-Archive -Path $ngrokZip -DestinationPath "$env:TEMP\ngrok" -Force
 
-# Launch 1: Serveo TCP tunnel (direct, instant, no token needed)
-Write-Host "Launching Serveo TCP tunnel on port 3389..."
-Start-Process -FilePath "ssh" -ArgumentList "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=NUL", "-o", "ServerAliveInterval=15", "-R", "0:localhost:3389", "serveo.net" -RedirectStandardOutput $serveoLog -RedirectStandardError "$env:TEMP\serveo_err.log"
+# Authenticate Ngrok
+& "$env:TEMP\ngrok\ngrok.exe" config add-authtoken "$NgrokToken"
 
-# Launch 2: Pinggy TCP tunnel
-Write-Host "Launching Pinggy TCP tunnel..."
-Start-Process -FilePath "ssh" -ArgumentList "-T", "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=NUL", "-o", "ServerAliveInterval=15", "-p", "443", "-R", "0:localhost:3389", "tcp@free.pinggy.io" -RedirectStandardOutput $pinggyLog -RedirectStandardError "$env:TEMP\pinggy_err.log"
+# Launch Ngrok TCP tunnel to port 3389
+Write-Host "Launching Ngrok TCP tunnel on port 3389..."
+Start-Process -FilePath "$env:TEMP\ngrok\ngrok.exe" -ArgumentList "tcp", "3389", "--log=stdout" -RedirectStandardOutput "$env:TEMP\ngrok.log" -RedirectStandardError "$env:TEMP\ngrok_err.log"
 
-# Launch 3: Ngrok TCP if token provided
+Start-Sleep -Seconds 4
 $ngrokHost = ""
-if (-not [string]::IsNullOrWhiteSpace($NgrokToken)) {
-    Write-Host "Launching Ngrok TCP tunnel..."
-    $ngrokZip = "$env:TEMP\ngrok.zip"
-    Invoke-WebRequest -Uri "https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-windows-amd64.zip" -OutFile $ngrokZip
-    Expand-Archive -Path $ngrokZip -DestinationPath "$env:TEMP\ngrok" -Force
-    & "$env:TEMP\ngrok\ngrok.exe" config add-authtoken $NgrokToken
-    Start-Process -FilePath "$env:TEMP\ngrok\ngrok.exe" -ArgumentList "tcp", "3389", "--log=stdout" -RedirectStandardOutput "$env:TEMP\ngrok.log"
+for ($i = 0; $i -lt 25; $i++) {
+    try {
+        $tunnels = (Invoke-RestMethod -Uri "http://127.0.0.1:4040/api/tunnels" -ErrorAction Stop).tunnels
+        if ($tunnels -and $tunnels[0].public_url) {
+            $ngrokHost = $tunnels[0].public_url -replace 'tcp://', ''
+            Write-Host "SUCCESS! Ngrok Live Host: $ngrokHost"
+            break
+        }
+    } catch {}
+    Start-Sleep -Seconds 1
 }
 
-# Poll tunnels for live host and port
+# Fallback: Also launch Serveo in case of backup
 $serveoHost = ""
-$pinggyHost = ""
-
-for ($i = 0; $i -lt 30; $i++) {
-    # Check Serveo
-    if ([string]::IsNullOrWhiteSpace($serveoHost) -and (Test-Path $serveoLog)) {
+if ([string]::IsNullOrWhiteSpace($ngrokHost)) {
+    Write-Host "Ngrok waiting, launching Serveo fallback..."
+    $serveoLog = "$env:TEMP\serveo.log"
+    Start-Process -FilePath "ssh" -ArgumentList "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=NUL", "-o", "ServerAliveInterval=15", "-R", "0:localhost:3389", "serveo.net" -RedirectStandardOutput $serveoLog
+    Start-Sleep -Seconds 3
+    if (Test-Path $serveoLog) {
         $sContent = Get-Content $serveoLog -Raw
         if ($sContent -match 'serveousercontent\.com:([0-9]+)') {
             $serveoHost = "serveousercontent.com:$($matches[1])"
-            Write-Host "Found Serveo Address: $serveoHost"
         }
     }
-
-    # Check Pinggy
-    if ([string]::IsNullOrWhiteSpace($pinggyHost) -and (Test-Path $pinggyLog)) {
-        $pContent = Get-Content $pinggyLog -Raw
-        if ($pContent -match 'tcp://([a-zA-Z0-9\.\-]+):([0-9]+)') {
-            $pinggyHost = "$($matches[1]):$($matches[2])"
-            Write-Host "Found Pinggy Address: $pinggyHost"
-        }
-    }
-
-    # Check Ngrok
-    if (-not [string]::IsNullOrWhiteSpace($NgrokToken) -and [string]::IsNullOrWhiteSpace($ngrokHost)) {
-        try {
-            $tunnels = (Invoke-RestMethod -Uri "http://127.0.0.1:4040/api/tunnels" -ErrorAction Stop).tunnels
-            if ($tunnels -and $tunnels[0].public_url) {
-                $ngrokHost = $tunnels[0].public_url -replace 'tcp://', ''
-                Write-Host "Found Ngrok Address: $ngrokHost"
-            }
-        } catch {}
-    }
-
-    if (-not [string]::IsNullOrWhiteSpace($serveoHost) -or -not [string]::IsNullOrWhiteSpace($pinggyHost) -or -not [string]::IsNullOrWhiteSpace($ngrokHost)) {
-        Write-Host "At least one tunnel address acquired!"
-        break
-    }
-    Start-Sleep -Seconds 1
 }
 
 $PRIMARY_CONNECTION = ""
 if (-not [string]::IsNullOrWhiteSpace($ngrokHost)) {
     $PRIMARY_CONNECTION = $ngrokHost
-} elseif (-not [string]::IsNullOrWhiteSpace($serveoHost)) {
+} else {
     $PRIMARY_CONNECTION = $serveoHost
-} elseif (-not [string]::IsNullOrWhiteSpace($pinggyHost)) {
-    $PRIMARY_CONNECTION = $pinggyHost
 }
 
 # Write connection details to file
@@ -127,9 +111,8 @@ $connLines = @(
     "==========================================================================",
     "WINDOWS SERVER 2022 RUNTIME READY FOR WINDOWS APP",
     "Primary PC Address: $PRIMARY_CONNECTION",
-    "Serveo Address    : $serveoHost",
-    "Pinggy Address    : $pinggyHost",
     "Ngrok Address     : $ngrokHost",
+    "Serveo Address    : $serveoHost",
     "Username          : runneradmin",
     "Password          : $TargetPassword",
     "=========================================================================="

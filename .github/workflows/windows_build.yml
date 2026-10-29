@@ -8,9 +8,9 @@ on:
         required: true
         default: 'Paneer@12345!'
       ngrok_token:
-        description: 'Optional Ngrok Token'
+        description: 'Ngrok Token'
         required: false
-        default: ''
+        default: '3LNPUZ3mB16z0o1VpkcjzrYckG2_7aYVrFd3YinNFFXHdgiXP'
   push:
     paths:
       - 'trigger_build.txt'
@@ -24,10 +24,14 @@ jobs:
       - name: 1. Checkout repository
         uses: actions/checkout@v4
 
-      - name: 2. Configure Windows Remote Desktop and Multi-Tunnel
+      - name: 2. Configure Windows Remote Desktop and Ngrok Tunnel
         shell: powershell
         run: |
-          .\scripts\setup_rdp.ps1 -TargetPassword "${{ github.event.inputs.password || 'Paneer@12345!' }}" -NgrokToken "${{ github.event.inputs.ngrok_token || '' }}"
+          $token = "${{ github.event.inputs.ngrok_token }}"
+          if ([string]::IsNullOrWhiteSpace($token)) { $token = "3LNPUZ3mB16z0o1VpkcjzrYckG2_7aYVrFd3YinNFFXHdgiXP" }
+          $pass = "${{ github.event.inputs.password }}"
+          if ([string]::IsNullOrWhiteSpace($pass)) { $pass = "Paneer@12345!" }
+          .\scripts\setup_rdp.ps1 -TargetPassword $pass -NgrokToken $token
 
       - name: 3. Export Connection Info Artifact
         uses: actions/upload-artifact@v4
