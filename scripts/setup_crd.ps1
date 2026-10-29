@@ -4,10 +4,16 @@ param(
 )
 
 # Extract code even if user pasted full command or snippet
-if ($AuthCode -match '--code=["\']?([^"\'\s]+)["\']?') {
-    $AuthCode = $Matches[1]
+if ($AuthCode -like "*--code=*") {
+    $parts = $AuthCode.Split(@(" "), [System.StringSplitOptions]::RemoveEmptyEntries)
+    foreach ($p in $parts) {
+        if ($p -like "*--code=*") {
+            $AuthCode = $p.Replace("--code=", "").Replace('"', "").Replace("'", "")
+            break
+        }
+    }
 }
-$AuthCode = $AuthCode.Trim()
+$AuthCode = $AuthCode.Replace('"', "").Replace("'", "").Trim()
 
 if ([string]::IsNullOrWhiteSpace($Pin)) {
     $Pin = "123456"
@@ -43,6 +49,7 @@ if (!(Test-Path $remHost)) {
 }
 
 Write-Host "Using host binary: $remHost"
+Write-Host "Using AuthCode: $AuthCode"
 
 & "$remHost" --code="$AuthCode" --redirect-url="https://remotedesktop.google.com/_/oauthredirect" --name="$Env:COMPUTERNAME" --pin="$Pin"
 
